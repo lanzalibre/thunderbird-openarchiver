@@ -8,7 +8,7 @@ LOG_FILE      := /tmp/openarchiver.log
 BACKEND_PID   := /tmp/oa-backend.pid
 FRONTEND_PID  := /tmp/oa-frontend.pid
 
-PORT_FRONTEND ?= 3000
+PORT_FRONTEND ?= 3100
 PORT_BACKEND  ?= 4000
 
 RED    := \033[0;31m
