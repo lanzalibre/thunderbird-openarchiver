@@ -59,7 +59,7 @@ help:
 
 # ── All-in-one ──────────────────────────────────────────────────────────
 
-start: start-db start-containers start-backend start-frontend check-health
+start: start-db start-containers start-api start-frontend check-health
 
 stop: stop-frontend stop-backend stop-containers
 
@@ -225,14 +225,15 @@ queue: status-queue
 # ── Backend API ───────────────────────────────────────────────────────────
 
 start-api:
-	@if pgrep -f "node.*open-archiver/dist/index" >/dev/null 2>&1; then \
-		printf "$(GREEN)[OK]$(NC) API already running (PID $$(pgrep -f 'node.*open-archiver/dist/index' | head -1))\n"; \
+	@if pgrep -f "node.*apps/open-archiver/dist/index" >/dev/null 2>&1; then \
+		printf "$(GREEN)[OK]$(NC) API already running (PID $$(pgrep -f 'node.*apps/open-archiver/dist/index' | head -1))\n"; \
 	else \
 		echo "Starting backend API..."; \
-		nohup sh -c 'cd $(SRC_DIR) && DOTENV_CONFIG_PATH=$(ENV_FILE) node -r dotenv/config packages/backend/dist/index.js' \
+		$(MAKE) --no-print-directory start-db start-search start-queue; \
+		nohup sh -c 'cd $(SRC_DIR) && DOTENV_CONFIG_PATH=$(ENV_FILE) node -r dotenv/config apps/open-archiver/dist/index.js' \
 			>> $(LOG_FILE) 2>&1 & \
 		echo $$! > $(BACKEND_PID); \
-		sleep 3; \
+		sleep 5; \
 		code=$$(curl -s -o /dev/null -w '%{http_code}' http://localhost:4000/v1/auth/status 2>/dev/null || echo "000"); \
 		if [ "$$code" != "000" ]; then \
 			printf "$(GREEN)[OK]$(NC) API running on http://localhost:4000 (HTTP $$code)\n"; \
@@ -242,13 +243,13 @@ start-api:
 	fi
 
 stop-api:
-	@pkill -f "node.*open-archiver/packages/backend/dist/index" 2>/dev/null && \
+	@pkill -f "node.*apps/open-archiver/dist/index" 2>/dev/null && \
 		printf "$(GREEN)[OK]$(NC) API stopped\n" || \
 		printf "$(YELLOW)[AVISO]$(NC) API was not running\n"
 	@rm -f $(BACKEND_PID)
 
 status-api:
-	@pid=$$(pgrep -f "node.*open-archiver/packages/backend/dist/index" 2>/dev/null | head -1); \
+	@pid=$$(pgrep -f "node.*apps/open-archiver/dist/index" 2>/dev/null | head -1); \
 	if [ -n "$$pid" ]; then \
 		code=$$(curl -s -o /dev/null -w '%{http_code}' http://localhost:4000/v1/auth/status 2>/dev/null || echo "000"); \
 		printf "$(GREEN)[OK]$(NC) API running (PID $$pid, HTTP $$code on port 4000)\n"; \
