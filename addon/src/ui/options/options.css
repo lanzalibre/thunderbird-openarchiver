@@ -1,0 +1,88 @@
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  max-width: 600px;
+  margin: 2rem auto;
+  padding: 0 1rem;
+  color: #222;
+  background: #f9f9f9;
+}
+
+h1 { font-size: 1.5rem; margin-bottom: 1.5rem; }
+
+section {
+  background: #fff;
+  border: 1px solid #ddd;
+  border-radius: 8px;
+  padding: 1.25rem;
+  margin-bottom: 1rem;
+}
+
+section h2 {
+  font-size: 1rem;
+  margin: 0 0 1rem;
+  color: #555;
+}
+
+label {
+  display: block;
+  font-weight: 600;
+  margin: 0.75rem 0 0.25rem;
+  font-size: 0.9rem;
+}
+
+input[type="url"],
+input[type="password"],
+input[type="number"],
+input[type="text"] {
+  width: 100%;
+  padding: 0.5rem;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  box-sizing: border-box;
+  font-size: 0.9rem;
+}
+
+input:invalid { border-color: #e74c3c; }
+
+.hint {
+  display: block;
+  font-size: 0.8rem;
+  color: #888;
+  margin-top: 0.2rem;
+}
+
+.actions {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 1rem;
+}
+
+button {
+  padding: 0.5rem 1rem;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  background: #fff;
+  cursor: pointer;
+  font-size: 0.9rem;
+}
+
+button:hover { background: #f0f0f0; }
+button:disabled { opacity: 0.6; cursor: default; }
+
+#saveBtn { background: #0060df; color: #fff; border-color: #0060df; }
+#saveBtn:hover { background: #003eaa; }
+#saveBtn:disabled { background: #7ba5e0; border-color: #7ba5e0; }
+
+.danger { color: #c00; border-color: #c00; }
+.danger:hover { background: #ffe0e0; }
+
+.status {
+  padding: 0.75rem;
+  border-radius: 4px;
+  margin-top: 1rem;
+  font-size: 0.9rem;
+}
+
+.status.success { background: #d4edda; color: #155724; border: 1px solid #c3e6cb; }
+.status.error { background: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; }
+.status.info { background: #d1ecf1; color: #0c5460; border: 1px solid #bee5eb; }

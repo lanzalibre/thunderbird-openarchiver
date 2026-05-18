@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Open Archiver Search</title>
+  <link rel="stylesheet" href="panel.css">
+</head>
+<body>
+  <div id="app">
+    <div class="search-bar">
+      <input type="text" id="searchInput" placeholder="Search archive..." autofocus>
+      <button id="searchBtn">Search</button>
+    </div>
+
+    <div id="filters" class="filters">
+      <button id="toggleFilters" class="filter-toggle">Filters ▾</button>
+      <div id="filterBody" class="filter-body" hidden>
+        <label>From <input type="text" id="filterFrom" placeholder="sender@example.com"></label>
+        <label>To <input type="text" id="filterTo" placeholder="recipient@example.com"></label>
+        <label>Date from <input type="date" id="filterDateFrom"></label>
+        <label>Date to <input type="date" id="filterDateTo"></label>
+      </div>
+    </div>
+
+    <div id="statusBar" class="status-bar" hidden></div>
+
+    <div id="results" class="results"></div>
+
+    <div id="pagination" class="pagination" hidden>
+      <button id="prevPage" disabled>← Prev</button>
+      <span id="pageInfo"></span>
+      <button id="nextPage" disabled>Next →</button>
+    </div>
+  </div>
+
+  <script src="../../lib/normalize.js"></script>
+  <script src="../../lib/errors.js"></script>
+  <script src="panel.js"></script>
+</body>
+</html>

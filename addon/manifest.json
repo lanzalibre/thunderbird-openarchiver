@@ -1,0 +1,50 @@
+{
+  "manifest_version": 2,
+  "name": "Open Archiver Search",
+  "version": "0.1.0",
+  "description": "Search your Open Archiver email archive from Thunderbird",
+  "author": "lanzalibre",
+  "homepage_url": "https://github.com/lanzalibre/thunderbird-openarchiver",
+  "applications": {
+    "gecko": {
+      "id": "openarchiver-search@lanzalibre.github.io",
+      "strict_min_version": "115.0"
+    }
+  },
+  "permissions": [
+    "storage",
+    "tabs",
+    "notifications"
+  ],
+  "background": {
+    "scripts": [
+      "src/background/api.js",
+      "src/background/auth.js",
+      "src/background/state.js"
+    ]
+  },
+  "options_ui": {
+    "page": "src/ui/options/options.html",
+    "open_in_tab": true
+  },
+  "sidebar_action": {
+    "default_title": "Open Archiver Search",
+    "default_panel": "src/ui/search-panel/panel.html",
+    "open_at_install": false
+  },
+  "browser_action": {
+    "default_title": "Open Archiver Search",
+    "default_popup": "src/ui/popup/popup.html",
+    "default_icon": {
+      "16": "src/assets/icon-16.svg",
+      "32": "src/assets/icon-32.svg",
+      "64": "src/assets/icon-64.svg"
+    }
+  },
+  "icons": {
+    "16": "src/assets/icon-16.svg",
+    "32": "src/assets/icon-32.svg",
+    "64": "src/assets/icon-64.svg",
+    "128": "src/assets/icon-128.svg"
+  }
+}

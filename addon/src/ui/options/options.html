@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Open Archiver Search — Preferences</title>
+  <link rel="stylesheet" href="options.css">
+</head>
+<body>
+  <h1>Open Archiver Search — Preferences</h1>
+
+  <form id="settingsForm">
+    <section>
+      <h2>Connection</h2>
+
+      <label for="apiBaseUrl">API Base URL</label>
+      <input type="url" id="apiBaseUrl" placeholder="http://localhost:4000" required>
+      <span class="hint">Backend server URL (port 4000 by default). Routes at /v1/*.</span>
+
+      <label for="frontendBaseUrl">Web UI Base URL</label>
+      <input type="url" id="frontendBaseUrl" placeholder="http://localhost:3000" required>
+      <span class="hint">Frontend web UI URL (port 3000 by default). Used for opening messages in browser.</span>
+    </section>
+
+    <section>
+      <h2>Authentication</h2>
+
+      <label for="apiKey">API Key</label>
+      <input type="password" id="apiKey" placeholder="oa_live_...">
+      <span class="hint">API key with search:archive permission. Leave blank to use JWT token below.</span>
+
+      <label for="authToken">JWT Bearer Token</label>
+      <input type="password" id="authToken" placeholder="Bearer token">
+      <span class="hint">JWT token from Open Archiver login. Alternative to API key.</span>
+    </section>
+
+    <section>
+      <h2>Defaults</h2>
+
+      <label for="defaultResultLimit">Results per page</label>
+      <input type="number" id="defaultResultLimit" min="1" max="100" value="20">
+
+      <label for="defaultDateRangeDays">Default date range (days)</label>
+      <input type="number" id="defaultDateRangeDays" min="0" value="365">
+      <span class="hint">Set to 0 for no default date range.</span>
+    </section>
+
+    <div class="actions">
+      <button type="submit" id="saveBtn">Save</button>
+      <button type="button" id="testBtn">Test Connection</button>
+      <button type="button" id="clearBtn" class="danger">Remove All Credentials</button>
+    </div>
+
+    <div id="statusMessage" class="status" hidden></div>
+  </form>
+
+  <script src="../../lib/validate.js"></script>
+  <script src="../../lib/errors.js"></script>
+  <script src="options.js"></script>
+</body>
+</html>

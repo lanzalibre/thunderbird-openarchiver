@@ -1,0 +1,12 @@
+{
+  "name": "thunderbird-openarchiver",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Thunderbird extension for searching Open Archiver email archives",
+  "scripts": {
+    "test": "node test/runner.js",
+    "lint": "node scripts/run-lint.js",
+    "build": "bash scripts/package-addon.sh"
+  },
+  "devDependencies": {}
+}

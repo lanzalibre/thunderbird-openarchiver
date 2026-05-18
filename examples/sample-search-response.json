@@ -1,0 +1,53 @@
+{
+  "hits": [
+    {
+      "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+      "userEmail": "user@example.com",
+      "from": "alice@example.com",
+      "to": ["user@example.com"],
+      "cc": ["bob@example.com"],
+      "bcc": [],
+      "subject": "Q4 Invoice Review",
+      "body": "Hi team, please find attached the Q4 invoices for review. The total amount is $12,500. Let me know if you have any questions. Best, Alice",
+      "attachments": [
+        { "filename": "Q4-invoices.pdf", "content": "extracted text from PDF" }
+      ],
+      "timestamp": 1700000000,
+      "ingestionSourceId": "dcc45603-6cbc-41fe-a4f5-0243de99d184",
+      "_formatted": {
+        "subject": "<em>Q4 Invoice</em> Review",
+        "body": "Hi team, please find attached the <em>Q4</em> invoices for review..."
+      },
+      "_matchesPosition": {
+        "subject": [{ "start": 0, "length": 10 }],
+        "body": [{ "start": 35, "length": 2 }]
+      }
+    },
+    {
+      "id": "b2c3d4e5-f6a7-8901-bcde-f12345678901",
+      "userEmail": "user@example.com",
+      "from": "carol@example.com",
+      "to": ["user@example.com", "alice@example.com"],
+      "cc": [],
+      "bcc": [],
+      "subject": "Re: Budget planning 2025",
+      "body": "Thanks for the update. I've reviewed the numbers and they look good. Let's schedule a follow-up meeting next week.",
+      "attachments": [],
+      "timestamp": 1699000000,
+      "ingestionSourceId": "dcc45603-6cbc-41fe-a4f5-0243de99d184",
+      "_formatted": {
+        "subject": "Re: <em>Budget</em> planning 2025",
+        "body": "Thanks for the update. I've reviewed the numbers..."
+      },
+      "_matchesPosition": {
+        "subject": [{ "start": 4, "length": 6 }],
+        "body": []
+      }
+    }
+  ],
+  "total": 2,
+  "page": 1,
+  "limit": 10,
+  "totalPages": 1,
+  "processingTimeMs": 12
+}
