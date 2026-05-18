@@ -8,6 +8,9 @@ LOG_FILE      := /tmp/openarchiver.log
 BACKEND_PID   := /tmp/oa-backend.pid
 FRONTEND_PID  := /tmp/oa-frontend.pid
 
+PORT_FRONTEND ?= 3000
+PORT_BACKEND  ?= 4000
+
 RED    := \033[0;31m
 GREEN  := \033[0;32m
 YELLOW := \033[1;33m
@@ -93,11 +96,11 @@ check-health:
 	else \
 		printf "$(RED)[DOWN]$(NC) API         (port 4000)\n"; \
 	fi
-	@code=$$(curl -s -o /dev/null -w '%{http_code}' http://localhost:3000 2>/dev/null || echo "000"); \
+	@code=$$(curl -s -o /dev/null -w '%{http_code}' http://localhost:$(PORT_FRONTEND) 2>/dev/null || echo "000"); \
 	if [ "$$code" != "000" ]; then \
-		printf "$(GREEN)[OK]$(NC) Frontend    (port 3000) — HTTP $$code\n"; \
+		printf "$(GREEN)[OK]$(NC) Frontend    (port $(PORT_FRONTEND)) — HTTP $$code\n"; \
 	else \
-		printf "$(RED)[DOWN]$(NC) Frontend    (port 3000)\n"; \
+		printf "$(RED)[DOWN]$(NC) Frontend    (port $(PORT_FRONTEND))\n"; \
 	fi
 
 # ── Docker containers ────────────────────────────────────────────────────
@@ -264,14 +267,14 @@ start-frontend:
 	@if pgrep -f "node.*packages/frontend/build" >/dev/null 2>&1; then \
 		printf "$(GREEN)[OK]$(NC) Frontend already running\n"; \
 	else \
-		echo "Starting frontend..."; \
-		nohup sh -c 'cd $(SRC_DIR) && DOTENV_CONFIG_PATH=$(ENV_FILE) node -r dotenv/config packages/frontend/build/index.js' \
+		echo "Starting frontend on port $(PORT_FRONTEND)..."; \
+		nohup sh -c 'cd $(SRC_DIR) && DOTENV_CONFIG_PATH=$(ENV_FILE) PORT=$(PORT_FRONTEND) node -r dotenv/config packages/frontend/build/index.js' \
 			>> $(LOG_FILE) 2>&1 & \
 		echo $$! > $(FRONTEND_PID); \
 		sleep 3; \
-		code=$$(curl -s -o /dev/null -w '%{http_code}' http://localhost:3000 2>/dev/null || echo "000"); \
+		code=$$(curl -s -o /dev/null -w '%{http_code}' http://localhost:$(PORT_FRONTEND) 2>/dev/null || echo "000"); \
 		if [ "$$code" != "000" ]; then \
-			printf "$(GREEN)[OK]$(NC) Frontend running on http://localhost:3000 (HTTP $$code)\n"; \
+			printf "$(GREEN)[OK]$(NC) Frontend running on http://localhost:$(PORT_FRONTEND) (HTTP $$code)\n"; \
 		else \
 			printf "$(YELLOW)[AVISO]$(NC) Frontend not responding yet. Check logs: make tail-frontend\n"; \
 		fi; \
@@ -284,10 +287,10 @@ stop-frontend:
 	@rm -f $(FRONTEND_PID)
 
 status-frontend:
-	@pid=$$(pgrep -f "node.*packages/frontend/build/index" 2>/dev/null | head -1); \
+	@pid=$$(pgrep -f "node.*packages/frontend/build" 2>/dev/null | head -1); \
 	if [ -n "$$pid" ]; then \
-		code=$$(curl -s -o /dev/null -w '%{http_code}' http://localhost:3000 2>/dev/null || echo "000"); \
-		printf "$(GREEN)[OK]$(NC) Frontend running (PID $$pid, HTTP $$code on port 3000)\n"; \
+		code=$$(curl -s -o /dev/null -w '%{http_code}' http://localhost:$(PORT_FRONTEND) 2>/dev/null || echo "000"); \
+		printf "$(GREEN)[OK]$(NC) Frontend running (PID $$pid, HTTP $$code on port $(PORT_FRONTEND))\n"; \
 	else \
 		printf "$(RED)[DOWN]$(NC) Frontend not running\n"; \
 	fi
