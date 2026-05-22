@@ -237,18 +237,28 @@ var cls = class extends ExtensionAPI {
           var localPath = result.localEmlPath;
           (function (resultUrl, localEmlPath) {
             item.addEventListener("click", function () {
+              Services.console.logStringMessage(
+                "searchProviders: click localEmlPath=[" + (localEmlPath || "") + "] url=[" + (resultUrl || "") + "] MailUtils=" + (typeof MailUtils)
+              );
               if (localEmlPath) {
                 try {
                   var file = Cc[
                     "@mozilla.org/file/local;1"
                   ].createInstance(Ci.nsIFile);
                   file.initWithPath(localEmlPath);
-                  if (file.exists()) {
+                  var exists = file.exists();
+                  Services.console.logStringMessage(
+                    "searchProviders: file exists=" + exists + " path=" + localEmlPath
+                  );
+                  if (exists) {
                     var win =
                       Services.wm.getMostRecentWindow(
                         "mail:3pane"
                       );
                     if (win) {
+                      Services.console.logStringMessage(
+                        "searchProviders: opening with MailUtils.openEMLFile"
+                      );
                       var fileUri = Services.io
                         .getProtocolHandler("file")
                         .QueryInterface(
@@ -262,11 +272,14 @@ var cls = class extends ExtensionAPI {
                 } catch (e) {
                   Services.console.logStringMessage(
                     "searchProviders: openEml error: " +
-                      e.message
+                      (e.message || e)
                   );
                 }
               }
               if (resultUrl) {
+                Services.console.logStringMessage(
+                  "searchProviders: falling back to external protocol service"
+                );
                 try {
                   var ep = Cc[
                     "@mozilla.org/uriloader/external-protocol-service;1"
@@ -277,7 +290,7 @@ var cls = class extends ExtensionAPI {
                 } catch (e) {
                   Services.console.logStringMessage(
                     "searchProviders: openUrl error: " +
-                      e.message
+                      (e.message || e)
                   );
                 }
               }
