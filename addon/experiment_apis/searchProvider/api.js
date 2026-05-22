@@ -3,6 +3,9 @@
 var { ExtensionCommon } = ChromeUtils.importESModule(
   "resource://gre/modules/ExtensionCommon.sys.mjs"
 );
+var { MailUtils } = ChromeUtils.importESModule(
+  "resource:///modules/MailUtils.sys.mjs"
+);
 
 var cls = class extends ExtensionAPI {
   getAPI(context) {
@@ -245,8 +248,14 @@ var cls = class extends ExtensionAPI {
                       Services.wm.getMostRecentWindow(
                         "mail:3pane"
                       );
-                    if (win && win.OpenMessageFile) {
-                      win.OpenMessageFile(file);
+                    if (win) {
+                      var fileUri = Services.io
+                        .getProtocolHandler("file")
+                        .QueryInterface(
+                          Ci.nsIFileProtocolHandler
+                        )
+                        .newFileURI(file);
+                      MailUtils.openEMLFile(win, file, fileUri);
                       return;
                     }
                   }
