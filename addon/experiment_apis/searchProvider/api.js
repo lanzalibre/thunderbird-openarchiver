@@ -231,14 +231,40 @@ var cls = class extends ExtensionAPI {
           }
 
           var url = result.url;
-          (function (resultUrl) {
+          var localPath = result.localEmlPath;
+          (function (resultUrl, localEmlPath) {
             item.addEventListener("click", function () {
+              if (localEmlPath) {
+                try {
+                  var file = Cc[
+                    "@mozilla.org/file/local;1"
+                  ].createInstance(Ci.nsIFile);
+                  file.initWithPath(localEmlPath);
+                  if (file.exists()) {
+                    var win =
+                      Services.wm.getMostRecentWindow(
+                        "mail:3pane"
+                      );
+                    if (win && win.OpenMessageFile) {
+                      win.OpenMessageFile(file);
+                      return;
+                    }
+                  }
+                } catch (e) {
+                  Services.console.logStringMessage(
+                    "searchProviders: openEml error: " +
+                      e.message
+                  );
+                }
+              }
               if (resultUrl) {
                 try {
                   var ep = Cc[
                     "@mozilla.org/uriloader/external-protocol-service;1"
                   ].getService(Ci.nsIExternalProtocolService);
-                  ep.loadURI(Services.io.newURI(resultUrl, null, null));
+                  ep.loadURI(
+                    Services.io.newURI(resultUrl, null, null)
+                  );
                 } catch (e) {
                   Services.console.logStringMessage(
                     "searchProviders: openUrl error: " +
@@ -247,7 +273,7 @@ var cls = class extends ExtensionAPI {
                 }
               }
             });
-          })(url);
+          })(url, localPath);
 
           list.appendChild(item);
         }

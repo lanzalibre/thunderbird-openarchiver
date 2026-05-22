@@ -10,7 +10,10 @@ const STORAGE_KEYS = {
   authToken: 'oaAuthToken',
   defaultResultLimit: 'oaDefaultResultLimit',
   defaultDateRangeDays: 'oaDefaultDateRangeDays',
+  emlPathTemplate: 'oaEmlPathTemplate',
 };
+
+const DEFAULT_EML_PATH_TEMPLATE = '/Volumes/gmail_emls/open-archiver/santilh-gmail-{ingestionSourceId}/{id}.eml';
 
 async function getSettings() {
   const result = await browser.storage.local.get(Object.values(STORAGE_KEYS));
@@ -21,6 +24,7 @@ async function getSettings() {
     authToken: result[STORAGE_KEYS.authToken] || '',
     defaultResultLimit: parseInt(result[STORAGE_KEYS.defaultResultLimit] || '20', 10),
     defaultDateRangeDays: parseInt(result[STORAGE_KEYS.defaultDateRangeDays] || '365', 10),
+    emlPathTemplate: result[STORAGE_KEYS.emlPathTemplate] || DEFAULT_EML_PATH_TEMPLATE,
   };
 }
 
@@ -32,6 +36,7 @@ async function saveSettings(settings) {
   if (settings.authToken !== undefined) data[STORAGE_KEYS.authToken] = settings.authToken;
   if (settings.defaultResultLimit !== undefined) data[STORAGE_KEYS.defaultResultLimit] = settings.defaultResultLimit;
   if (settings.defaultDateRangeDays !== undefined) data[STORAGE_KEYS.defaultDateRangeDays] = settings.defaultDateRangeDays;
+  if (settings.emlPathTemplate !== undefined) data[STORAGE_KEYS.emlPathTemplate] = settings.emlPathTemplate;
   await browser.storage.local.set(data);
 }
 

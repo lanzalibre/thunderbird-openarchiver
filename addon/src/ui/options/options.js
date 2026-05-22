@@ -6,6 +6,7 @@
   const authToken = document.getElementById('authToken');
   const defaultResultLimit = document.getElementById('defaultResultLimit');
   const defaultDateRangeDays = document.getElementById('defaultDateRangeDays');
+  const emlPathTemplate = document.getElementById('emlPathTemplate');
   const saveBtn = document.getElementById('saveBtn');
   const testBtn = document.getElementById('testBtn');
   const clearBtn = document.getElementById('clearBtn');
@@ -14,7 +15,7 @@
   async function loadSettings() {
     const result = await browser.storage.local.get([
       'oaApiBaseUrl', 'oaFrontendBaseUrl', 'oaApiKey', 'oaAuthToken',
-      'oaDefaultResultLimit', 'oaDefaultDateRangeDays',
+      'oaDefaultResultLimit', 'oaDefaultDateRangeDays', 'oaEmlPathTemplate',
     ]);
     apiBaseUrl.value = result.oaApiBaseUrl || '';
     frontendBaseUrl.value = result.oaFrontendBaseUrl || '';
@@ -22,6 +23,7 @@
     authToken.value = result.oaAuthToken || '';
     defaultResultLimit.value = result.oaDefaultResultLimit || '20';
     defaultDateRangeDays.value = result.oaDefaultDateRangeDays || '365';
+    emlPathTemplate.value = result.oaEmlPathTemplate || '/Volumes/gmail_emls/open-archiver/santilh-gmail-{ingestionSourceId}/{id}.eml';
   }
 
   function showStatus(message, type) {
@@ -52,6 +54,7 @@
       oaAuthToken: authToken.value.trim(),
       oaDefaultResultLimit: parseInt(defaultResultLimit.value, 10) || 20,
       oaDefaultDateRangeDays: parseInt(defaultDateRangeDays.value, 10) || 365,
+      oaEmlPathTemplate: emlPathTemplate.value.trim(),
     });
 
     showStatus('Settings saved', 'success');
@@ -89,7 +92,7 @@
     if (!confirm('Remove all saved credentials and settings?')) return;
     await browser.storage.local.remove([
       'oaApiBaseUrl', 'oaFrontendBaseUrl', 'oaApiKey', 'oaAuthToken',
-      'oaDefaultResultLimit', 'oaDefaultDateRangeDays',
+      'oaDefaultResultLimit', 'oaDefaultDateRangeDays', 'oaEmlPathTemplate',
     ]);
     loadSettings();
     showStatus('All credentials removed', 'success');

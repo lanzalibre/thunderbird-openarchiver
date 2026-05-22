@@ -109,6 +109,7 @@
 
       var frontendBaseUrl =
         settings.frontendBaseUrl || settings.apiBaseUrl;
+      var emlTemplate = settings.emlPathTemplate || "";
 
       var apiResponse = await fetchWithRetry(
         settings.apiBaseUrl,
@@ -132,7 +133,7 @@
       }
 
       var mapped = apiResponse.hits.map(function (hit) {
-        return mapHitToResult(hit, frontendBaseUrl);
+        return mapHitToResult(hit, frontendBaseUrl, emlTemplate);
       });
 
       if (signal.aborted) return;
@@ -336,7 +337,7 @@
     return response.json();
   }
 
-  function mapHitToResult(hit, frontendBaseUrl) {
+  function mapHitToResult(hit, frontendBaseUrl, emlTemplate) {
     var snippet = "";
     if (hit._formatted && hit._formatted.body) {
       snippet = hit._formatted.body
@@ -347,6 +348,12 @@
     }
 
     var baseUrl = frontendBaseUrl.replace(/\/+$/, "");
+    var localEmlPath = "";
+    if (emlTemplate) {
+      localEmlPath = emlTemplate
+        .replace(/\{id\}/g, hit.id)
+        .replace(/\{ingestionSourceId\}/g, hit.ingestionSourceId || "");
+    }
 
     return {
       id: hit.id,
@@ -364,6 +371,7 @@
       hasAttachments:
         Array.isArray(hit.attachments) &&
         hit.attachments.length > 0,
+      localEmlPath: localEmlPath,
     };
   }
 
