@@ -24,8 +24,7 @@
       "parent": {
         "scopes": ["addon_parent"],
         "paths": [["searchProviders"]],
-        "script": "experiment_apis/searchProvider/api.js",
-        "events": ["startup"]
+        "script": "experiment_apis/searchProvider/api.js"
       }
     }
   },

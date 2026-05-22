@@ -16,6 +16,15 @@
     } else if (retryCount < maxRetries) {
       retryCount++;
       setTimeout(init, 500 * retryCount);
+    } else {
+      try {
+        browser.notifications.create("search-provider-error", {
+          type: "basic",
+          title: "Open Archiver Search",
+          message:
+            "Search provider API not available. Try reloading the add-on.",
+        });
+      } catch (e) {}
     }
   }
 

@@ -78,46 +78,28 @@ this.searchProviders = class extends ExtensionAPI {
 
     function tryInstallDomHook() {
       try {
-        const window =
+        var window =
           Services.wm.getMostRecentWindow("mail:3pane");
-        if (!window) {
-          // Window not ready — listen for it
-          const listener = {
-            observe(aSubject, aTopic) {
-              if (aTopic === "domwindowopened") {
-                // Will be set up when a window is ready
-              }
-            },
-          };
-          Services.obs.addObserver(listener, "domwindowopened");
-          return;
-        }
+        if (!window) return;
 
-        const searchInput = window.document.querySelector(
-          ".remote-gloda-search, #searchInput, input[type='search']"
+        var searchInput = window.document.querySelector(
+          ".remote-gloda-search, " +
+            "#searchInput, " +
+            "input[type='search'], " +
+            ".search-bar-input, " +
+            "#unifiedToolbar .search-container input"
         );
+        if (!searchInput) {
+          searchInput = window.document.querySelector(
+            "[name='search'], " +
+              "[aria-label='Search'], " +
+              "toolbarbutton[label*='Search'] + * input"
+          );
+        }
         if (searchInput && !searchInputListener) {
           searchInputListener = function (event) {
-            if (event.key !== "Enter") return;
-            const searchString = searchInput.value;
-            if (!searchString) return;
-
-            const queryId =
-              "oa-" +
-              Date.now() +
-              "-" +
-              Math.random().toString(36).slice(2, 8);
-
-            if (searchEventFire) {
-              searchEventFire
-                .async({
-                  queryId,
-                  searchString,
-                  offset: 0,
-                  limit: 10,
-                  filters: {},
-                })
-                .catch(() => {});
+            if (event.key === "Enter") {
+              fireSearch(searchInput.value);
             }
           };
           searchInput.addEventListener(
@@ -125,9 +107,25 @@ this.searchProviders = class extends ExtensionAPI {
             searchInputListener
           );
         }
-      } catch (e) {
-        // DOM hook failed — search integration degraded
-      }
+      } catch (e) {}
+    }
+
+    function fireSearch(searchString) {
+      if (!searchString || !searchEventFire) return;
+      var queryId =
+        "oa-" +
+        Date.now() +
+        "-" +
+        Math.random().toString(36).slice(2, 8);
+      searchEventFire
+        .async({
+          queryId: queryId,
+          searchString: searchString,
+          offset: 0,
+          limit: 10,
+          filters: {},
+        })
+        .catch(function () {});
     }
 
     function uninstallHook() {
