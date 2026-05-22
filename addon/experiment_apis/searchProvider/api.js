@@ -213,8 +213,14 @@ var cls = class extends ExtensionAPI {
             ].createInstance(Ci.nsIFileOutputStream);
             stream.init(tmpFile, 0x02 | 0x08 | 0x20, 0o666, 0);
             var bytes = new Uint8Array(buf);
+            Services.console.logStringMessage(
+              "searchProviders: writing " + bytes.length + " bytes to " + tmpFile.path
+            );
             stream.write(bytes, bytes.length);
             stream.close();
+            Services.console.logStringMessage(
+              "searchProviders: file written, size=" + tmpFile.fileSize + " exists=" + tmpFile.exists()
+            );
             var win = Services.wm.getMostRecentWindow(
               "mail:3pane"
             );
@@ -223,6 +229,9 @@ var cls = class extends ExtensionAPI {
                 .getProtocolHandler("file")
                 .QueryInterface(Ci.nsIFileProtocolHandler)
                 .newFileURI(tmpFile);
+              Services.console.logStringMessage(
+                "searchProviders: opening with MailUtils.openEMLFile, uri=" + fileUri.spec
+              );
               MailUtils.openEMLFile(win, tmpFile, fileUri);
             }
           } catch (e) {
