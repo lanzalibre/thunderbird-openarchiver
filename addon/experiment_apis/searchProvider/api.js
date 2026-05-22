@@ -6,6 +6,9 @@ var { ExtensionCommon } = ChromeUtils.importESModule(
 var { MailUtils } = ChromeUtils.importESModule(
   "resource:///modules/MailUtils.sys.mjs"
 );
+var { NetUtil } = ChromeUtils.importESModule(
+  "resource://gre/modules/NetUtil.sys.mjs"
+);
 
 var cls = class extends ExtensionAPI {
   getAPI(context) {
@@ -290,56 +293,55 @@ var cls = class extends ExtensionAPI {
 
           (function (url_0, spath, apibase, apikey) {
             item.addEventListener("click", function () {
-              if (spath && apibase) {
-                var downloadUrl =
-                  apibase.replace(/\/+$/, "") +
-                  "/v1/storage/download?path=" +
-                  encodeURIComponent(spath);
-
-                var xhr = Cc[
-                  "@mozilla.org/xmlextras/xmlhttprequest;1"
-                ].createInstance(Ci.nsIXMLHttpRequest);
-                xhr.open("GET", downloadUrl, true);
-                if (apikey) {
-                  xhr.setRequestHeader("X-API-Key", apikey);
-                }
-                xhr.responseType = "arraybuffer";
-                xhr.timeout = 15000;
-
-                xhr.onload = function () {
-                  try {
-                    if (
-                      xhr.status < 200 ||
-                      xhr.status >= 300
-                    ) {
-                      throw new Error("HTTP " + xhr.status);
-                    }
-                    var buf = xhr.response;
-                    writeAndOpen(buf);
-                  } catch (e) {
-                    Services.console.logStringMessage(
-                      "searchProviders: downloadEml error: " +
-                        (e.message || e)
+              function downloadAndOpen() {
+                try {
+                  var downloadUrl =
+                    apibase.replace(/\/+$/, "") +
+                    "/v1/storage/download?path=" +
+                    encodeURIComponent(spath);
+                  var uri = Services.io.newURI(downloadUrl);
+                  var channel = Services.io.newChannelFromURI(
+                    uri,
+                    null,
+                    Services.scriptSecurityManager
+                      .getSystemPrincipal(),
+                    null,
+                    Ci.nsILoadInfo
+                      .SEC_ALLOW_CROSS_ORIGIN_SEC_CONTEXT_IS_NULL,
+                    Ci.nsIContentPolicy.TYPE_OTHER
+                  );
+                  var httpChannel = channel.QueryInterface(
+                    Ci.nsIHttpChannel
+                  );
+                  if (apikey) {
+                    httpChannel.setRequestHeader(
+                      "X-API-Key",
+                      apikey,
+                      false
                     );
-                    if (url_0) openInBrowser(url_0);
                   }
-                };
-
-                xhr.onerror = function () {
+                  var stream = httpChannel.open();
+                  var bis = Cc[
+                    "@mozilla.org/binaryinputstream;1"
+                  ].createInstance(Ci.nsIBinaryInputStream);
+                  bis.setInputStream(stream);
+                  var bytes = bis.readByteArray(
+                    bis.available()
+                  );
+                  bis.close();
+                  stream.close();
+                  writeAndOpen(bytes);
+                } catch (e) {
                   Services.console.logStringMessage(
-                    "searchProviders: downloadEml network error"
+                    "searchProviders: downloadEml error: " +
+                      (e.message || e)
                   );
                   if (url_0) openInBrowser(url_0);
-                };
+                }
+              }
 
-                xhr.ontimeout = function () {
-                  Services.console.logStringMessage(
-                    "searchProviders: downloadEml timeout"
-                  );
-                  if (url_0) openInBrowser(url_0);
-                };
-
-                xhr.send();
+              if (spath && apibase) {
+                downloadAndOpen();
               } else if (url_0) {
                 openInBrowser(url_0);
               }
