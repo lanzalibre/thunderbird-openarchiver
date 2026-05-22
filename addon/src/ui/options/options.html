@@ -45,8 +45,8 @@
       <span class="hint">Set to 0 for no default date range.</span>
 
       <label for="emlPathTemplate">Local EML Path Template</label>
-      <input type="text" id="emlPathTemplate" placeholder="/Volumes/gmail_emls/open-archiver/santilh-gmail-{ingestionSourceId}/{id}.eml">
-      <span class="hint">Filesystem path to .eml files. Use <code>{id}</code> for email ID and <code>{ingestionSourceId}</code> for source ID.</span>
+      <input type="text" id="emlPathTemplate" placeholder="/Volumes/gmail_emls/{storagePath}">
+      <span class="hint">Filesystem path to .eml files. Use <code>{storagePath}</code> for the value returned by the API.</span>
     </section>
 
     <div class="actions">

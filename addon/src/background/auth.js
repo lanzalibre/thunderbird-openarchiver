@@ -13,7 +13,7 @@ const STORAGE_KEYS = {
   emlPathTemplate: 'oaEmlPathTemplate',
 };
 
-const DEFAULT_EML_PATH_TEMPLATE = '/Volumes/gmail_emls/open-archiver/santilh-gmail-{ingestionSourceId}/{id}.eml';
+const DEFAULT_EML_PATH_TEMPLATE = '/Volumes/gmail_emls/{storagePath}';
 
 async function getSettings() {
   const result = await browser.storage.local.get(Object.values(STORAGE_KEYS));

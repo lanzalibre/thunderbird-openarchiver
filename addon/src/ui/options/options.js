@@ -23,7 +23,7 @@
     authToken.value = result.oaAuthToken || '';
     defaultResultLimit.value = result.oaDefaultResultLimit || '20';
     defaultDateRangeDays.value = result.oaDefaultDateRangeDays || '365';
-    emlPathTemplate.value = result.oaEmlPathTemplate || '/Volumes/gmail_emls/open-archiver/santilh-gmail-{ingestionSourceId}/{id}.eml';
+    emlPathTemplate.value = result.oaEmlPathTemplate || '/Volumes/gmail_emls/{storagePath}';
   }
 
   function showStatus(message, type) {

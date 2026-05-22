@@ -133,10 +133,40 @@
       }
 
       var mapped = apiResponse.hits.map(function (hit) {
-        return mapHitToResult(hit, frontendBaseUrl, emlTemplate);
+        return mapHitToResult(hit, frontendBaseUrl);
       });
 
       if (signal.aborted) return;
+
+      // Fetch storagePath for each hit in parallel
+      var storagePaths = await Promise.all(
+        mapped.map(async function (result) {
+          try {
+            var detail = await fetchArchivedEmail(
+              settings.apiBaseUrl,
+              settings.apiKey || "",
+              settings.authToken || "",
+              result.id,
+              signal
+            );
+            return detail && detail.storagePath ? detail.storagePath : "";
+          } catch (e) {
+            return "";
+          }
+        })
+      );
+
+      if (signal.aborted) return;
+
+      // Attach localEmlPath to each result
+      for (var i = 0; i < mapped.length; i++) {
+        if (storagePaths[i] && emlTemplate) {
+          mapped[i].localEmlPath = emlTemplate.replace(
+            /\{storagePath\}/g,
+            storagePaths[i]
+          );
+        }
+      }
 
       trySendResults(request.queryId, {
         results: mapped,
@@ -337,7 +367,38 @@
     return response.json();
   }
 
-  function mapHitToResult(hit, frontendBaseUrl, emlTemplate) {
+  async function fetchArchivedEmail(
+    apiBaseUrl,
+    apiKey,
+    authToken,
+    emailId,
+    signal
+  ) {
+    try {
+      var baseUrl = apiBaseUrl.replace(/\/+$/, "");
+      var url = baseUrl + "/v1/archived-emails/" + encodeURIComponent(emailId);
+      var headers = { Accept: "application/json" };
+      if (apiKey) {
+        headers["X-API-Key"] = apiKey;
+      } else if (authToken) {
+        headers["Authorization"] = "Bearer " + authToken;
+      }
+      var combinedSignal = combineSignals(
+        signal,
+        AbortSignal.timeout(3000)
+      );
+      var response = await fetch(url, {
+        headers: headers,
+        signal: combinedSignal,
+      });
+      if (!response.ok) return null;
+      return response.json();
+    } catch (e) {
+      return null;
+    }
+  }
+
+  function mapHitToResult(hit, frontendBaseUrl) {
     var snippet = "";
     if (hit._formatted && hit._formatted.body) {
       snippet = hit._formatted.body
@@ -348,12 +409,6 @@
     }
 
     var baseUrl = frontendBaseUrl.replace(/\/+$/, "");
-    var localEmlPath = "";
-    if (emlTemplate) {
-      localEmlPath = emlTemplate
-        .replace(/\{id\}/g, hit.id)
-        .replace(/\{ingestionSourceId\}/g, hit.ingestionSourceId || "");
-    }
 
     return {
       id: hit.id,
@@ -371,7 +426,6 @@
       hasAttachments:
         Array.isArray(hit.attachments) &&
         hit.attachments.length > 0,
-      localEmlPath: localEmlPath,
     };
   }
 
