@@ -320,20 +320,44 @@ var cls = class extends ExtensionAPI {
                       false
                     );
                   }
-                  var stream = httpChannel.open();
-                  var bis = Cc[
-                    "@mozilla.org/binaryinputstream;1"
-                  ].createInstance(Ci.nsIBinaryInputStream);
-                  bis.setInputStream(stream);
-                  var bytes = bis.readByteArray(
-                    bis.available()
+                  NetUtil.asyncFetch(
+                    channel,
+                    function (inputStream, status) {
+                      try {
+                        if (!Components.isSuccessCode(status)) {
+                          throw new Error(
+                            "Request failed with status " +
+                              status
+                          );
+                        }
+                        var bis = Cc[
+                          "@mozilla.org/binaryinputstream;1"
+                        ].createInstance(
+                          Ci.nsIBinaryInputStream
+                        );
+                        bis.setInputStream(inputStream);
+                        var available = bis.available();
+                        if (available === 0) {
+                          throw new Error(
+                            "Empty response (0 bytes)"
+                          );
+                        }
+                        var bytes =
+                          bis.readByteArray(available);
+                        bis.close();
+                        writeAndOpen(bytes);
+                      } catch (e) {
+                        Services.console.logStringMessage(
+                          "searchProviders: downloadEml error: " +
+                            (e.message || e)
+                        );
+                        if (url_0) openInBrowser(url_0);
+                      }
+                    }
                   );
-                  bis.close();
-                  stream.close();
-                  writeAndOpen(bytes);
                 } catch (e) {
                   Services.console.logStringMessage(
-                    "searchProviders: downloadEml error: " +
+                    "searchProviders: downloadEml setup error: " +
                       (e.message || e)
                   );
                   if (url_0) openInBrowser(url_0);
