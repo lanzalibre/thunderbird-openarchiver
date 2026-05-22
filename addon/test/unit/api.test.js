@@ -326,6 +326,197 @@ function formatProviderError(status, message) {
   return message || 'Search failed';
 }
 
+// ── Hardening Tests ────────────────────────────────────────────────────────
+
+function testClassifyAuthError() {
+  const result = classifyError(new Error('HTTP 401: Unauthorized'));
+  assert.strictEqual(result.status, 'auth-error');
+  assert.ok(result.message.toLowerCase().includes('authentication'));
+  console.log('  ✓ classifyError detects auth error');
+}
+
+function testClassifyForbiddenError() {
+  const result = classifyError(new Error('HTTP 403: Forbidden'));
+  assert.strictEqual(result.status, 'auth-error');
+  assert.ok(result.message.toLowerCase().includes('access denied') ||
+            result.message.toLowerCase().includes('permission'));
+  console.log('  ✓ classifyError detects forbidden error');
+}
+
+function testClassifyRateLimitError() {
+  const result = classifyError(new Error('HTTP 429: Rate limited'));
+  assert.strictEqual(result.status, 'error');
+  assert.ok(result.message.toLowerCase().includes('rate limit'));
+  console.log('  ✓ classifyError detects rate limit');
+}
+
+function testClassifyNetworkError() {
+  const result = classifyError(new Error('Failed to fetch'));
+  assert.strictEqual(result.status, 'unavailable');
+  assert.ok(result.message.toLowerCase().includes('reach'));
+  console.log('  ✓ classifyError detects network error');
+}
+
+function testClassifyTimeoutError() {
+  const result = classifyError(new Error('The operation timed out'));
+  assert.strictEqual(result.status, 'unavailable');
+  assert.ok(result.message.toLowerCase().includes('time'));
+  console.log('  ✓ classifyError detects timeout');
+}
+
+function testClassifyGenericError() {
+  const result = classifyError(new Error('Something went wrong'));
+  assert.strictEqual(result.status, 'error');
+  assert.strictEqual(result.message, 'Something went wrong');
+  console.log('  ✓ classifyError handles generic error');
+}
+
+function testIsNetworkErrorTrue() {
+  assert.ok(isNetworkError(new Error('Failed to fetch')));
+  assert.ok(isNetworkError(new Error('TypeError: NetworkError')));
+  assert.ok(isNetworkError(new Error('network error')));
+  assert.ok(isNetworkError(new Error('Failed to fetch from server')));
+  console.log('  ✓ isNetworkError recognizes network errors');
+}
+
+function testIsNetworkErrorFalse() {
+  assert.ok(!isNetworkError(new Error('HTTP 401: Unauthorized')));
+  assert.ok(!isNetworkError(new Error('Rate limited')));
+  assert.ok(!isNetworkError(new Error('')));
+  console.log('  ✓ isNetworkError rejects non-network errors');
+}
+
+function testExtractRetryAfter() {
+  const err1 = new Error('HTTP 429: Rate limited. Retry-After: 30');
+  assert.strictEqual(extractRetryAfter(err1), 30);
+
+  const err2 = new Error('No retry header');
+  assert.strictEqual(extractRetryAfter(err2), 5);
+  console.log('  ✓ extractRetryAfter parses Retry-After header');
+}
+
+function testCombineSignalsAbortsOnEither() {
+  const controller1 = new AbortController();
+  const controller2 = new AbortController();
+  const combined = combineSignals(controller1.signal, controller2.signal);
+
+  assert.ok(!combined.aborted);
+  controller1.abort();
+  assert.ok(combined.aborted);
+  console.log('  ✓ combineSignals aborts on first signal');
+}
+
+function testCombineSignalsPreAborted() {
+  const aborted = AbortSignal.abort();
+  const normal = new AbortController().signal;
+  const combined = combineSignals(aborted, normal);
+  assert.ok(combined.aborted);
+  console.log('  ✓ combineSignals handles pre-aborted signal');
+}
+
+function testMapHitWithAllFilters() {
+  const hit = {
+    id: 'f-001',
+    subject: 'Filtered email',
+    from: 'sender@filter.com',
+    to: ['recip@filter.com'],
+    cc: ['cc@filter.com'],
+    bcc: ['bcc@filter.com'],
+    timestamp: 1716000000,
+    body: 'Filtered body content',
+    attachments: [],
+  };
+
+  const result = mapHitToProviderResult(hit, 'http://oa.local');
+  assert.strictEqual(result.sender, 'sender@filter.com');
+  assert.deepStrictEqual(result.recipients, ['recip@filter.com']);
+  assert.deepStrictEqual(result.cc, ['cc@filter.com']);
+  assert.deepStrictEqual(result.bcc, ['bcc@filter.com']);
+  console.log('  ✓ mapHitToProviderResult preserves all filter fields');
+}
+
+function testClassifyErrorEdgeCases() {
+  const nullResult = classifyError(null);
+  assert.strictEqual(nullResult.status, 'error');
+
+  const emptyResult = classifyError(new Error(''));
+  assert.strictEqual(emptyResult.status, 'error');
+
+  const undefResult = classifyError(undefined);
+  assert.strictEqual(undefResult.status, 'error');
+  console.log('  ✓ classifyError handles edge cases');
+}
+
+function testBuildProviderResponseFromArray() {
+  const hits = [
+    { id: 'a', subject: 'A', from: 'a@b.com', to: [], timestamp: 1, body: '', attachments: [] },
+    { id: 'b', subject: 'B', from: 'c@d.com', to: [], timestamp: 2, body: '', attachments: [] },
+  ];
+  const results = buildProviderResponse({ hits, total: 2 }, 'http://localhost');
+  assert.strictEqual(results.length, 2);
+  assert.strictEqual(results[0].id, 'a');
+  assert.strictEqual(results[1].id, 'b');
+  console.log('  ✓ buildProviderResponse converts multiple hits');
+}
+
+function testBuildProviderResponseNoTotal() {
+  const hits = [{ id: 'x', subject: 'X', from: 'x@y.com', to: [], timestamp: 1, body: '', attachments: [] }];
+  const results = buildProviderResponse({ hits }, 'http://localhost');
+  assert.strictEqual(results.length, 1);
+  console.log('  ✓ buildProviderResponse works without total field');
+}
+
+// Error classification helpers (matching the production implementation)
+
+function classifyError(err) {
+  const msg = (err && err.message) || '';
+  const lower = msg.toLowerCase();
+
+  if (msg.indexOf('401') !== -1 || msg.indexOf('unauthorized') !== -1) {
+    return { status: 'auth-error', message: 'Authentication failed — check your API key' };
+  }
+  if (msg.indexOf('403') !== -1 || msg.indexOf('forbidden') !== -1) {
+    return { status: 'auth-error', message: 'Access denied — check search:archive permission' };
+  }
+  if (msg.indexOf('429') !== -1 || msg.indexOf('rate limit') !== -1) {
+    return { status: 'error', message: 'Rate limited by Open Archiver — please wait' };
+  }
+  if (msg.indexOf('fetch') !== -1 || msg.indexOf('network') !== -1 || msg.indexOf('failed') !== -1) {
+    return { status: 'unavailable', message: 'Could not reach Open Archiver' };
+  }
+  if (msg.indexOf('timeout') !== -1 || msg.indexOf('timed out') !== -1) {
+    return { status: 'unavailable', message: 'Open Archiver did not respond in time' };
+  }
+  return { status: 'error', message: msg || 'Search failed' };
+}
+
+function isNetworkError(err) {
+  const msg = (err && err.message) || '';
+  return msg.indexOf('fetch') !== -1 || msg.indexOf('network') !== -1 ||
+         msg.indexOf('Failed to fetch') !== -1 || msg.indexOf('TypeError') !== -1;
+}
+
+function extractRetryAfter(err) {
+  try {
+    const parts = err.message.split('Retry-After: ');
+    if (parts.length > 1) {
+      return parseInt(parts[1], 10) || 5;
+    }
+  } catch (e) {}
+  return 5;
+}
+
+function combineSignals(signal1, signal2) {
+  const controller = new AbortController();
+  function onAbort() { controller.abort(); }
+  signal1.addEventListener('abort', onAbort);
+  signal2.addEventListener('abort', onAbort);
+  if (signal1.aborted || signal2.aborted) {
+    controller.abort();
+  }
+  return controller.signal;
+}
+
 // Run tests
 console.log('Running unit tests...\n');
 testNormalizeEmptyResults();
@@ -344,4 +535,19 @@ testProviderBuildsDeepLinkUrl();
 testProviderBuildsDeepLinkWithTrailingSlash();
 testProviderErrorFormatting();
 testProviderErrorDefaults();
+testClassifyAuthError();
+testClassifyForbiddenError();
+testClassifyRateLimitError();
+testClassifyNetworkError();
+testClassifyTimeoutError();
+testClassifyGenericError();
+testIsNetworkErrorTrue();
+testIsNetworkErrorFalse();
+testExtractRetryAfter();
+testCombineSignalsAbortsOnEither();
+testCombineSignalsPreAborted();
+testMapHitWithAllFilters();
+testClassifyErrorEdgeCases();
+testBuildProviderResponseFromArray();
+testBuildProviderResponseNoTotal();
 console.log('\nAll tests passed ✓');

@@ -1,6 +1,9 @@
 (function () {
-  const PROVIDER_NAME = "openarchiver";
-  let registered = false;
+  var PROVIDER_NAME = "openarchiver";
+  var registered = false;
+  var debounceTimer = null;
+  var pendingQueryId = null;
+  var activeAbortController = null;
 
   async function registerProvider() {
     if (registered) return;
@@ -17,12 +20,42 @@
       return;
     }
 
-    browser.searchProviders.onSearchRequest.addListener(handleSearchRequest);
+    browser.searchProviders.onSearchRequest.addListener(
+      debounceRequest
+    );
+  }
+
+  function debounceRequest(request) {
+    if (debounceTimer) {
+      clearTimeout(debounceTimer);
+    }
+    if (activeAbortController) {
+      activeAbortController.abort();
+    }
+
+    debounceTimer = setTimeout(function () {
+      debounceTimer = null;
+      handleSearchRequest(request);
+    }, 300);
   }
 
   async function handleSearchRequest(request) {
+    activeAbortController = new AbortController();
+    var signal = activeAbortController.signal;
+
     try {
-      const settings = await getSettings();
+      var settings;
+      try {
+        settings = await getSettings();
+      } catch (e) {
+        browser.searchProviders.sendError(
+          request.queryId,
+          "error",
+          "Could not read extension settings."
+        );
+        return;
+      }
+
       if (!settings.apiBaseUrl) {
         browser.searchProviders.sendError(
           request.queryId,
@@ -32,123 +65,354 @@
         return;
       }
 
-      const apiKey = settings.apiKey || "";
-      const authToken = settings.authToken || "";
-      if (!apiKey && !authToken) {
+      if (!settings.apiKey && !settings.authToken) {
         browser.searchProviders.sendError(
           request.queryId,
           "auth-error",
-          "No API key configured. Open add-on preferences."
+          "Authentication not configured. Set an API key or auth token in extension preferences."
         );
         return;
       }
 
-      const frontendBaseUrl = settings.frontendBaseUrl || settings.apiBaseUrl;
+      var frontendBaseUrl =
+        settings.frontendBaseUrl || settings.apiBaseUrl;
 
-      const results = await fetchSearchResults(
+      var apiResponse = await fetchWithRetry(
         settings.apiBaseUrl,
-        apiKey,
-        authToken,
-        request
+        settings.apiKey || "",
+        settings.authToken || "",
+        request,
+        signal
       );
 
-      const mapped = results.hits.map(function (hit) {
-        const snippet = hit._formatted && hit._formatted.body
-          ? hit._formatted.body.replace(/<\/?em>/g, "").substring(0, 300)
-          : hit.body
-            ? hit.body.substring(0, 300)
-            : "";
+      if (signal.aborted) return;
 
-        return {
-          id: hit.id,
-          subject: hit.subject || "(no subject)",
-          sender: hit.from || "",
-          recipients: hit.to || [],
-          date: hit.timestamp || 0,
-          snippet: snippet,
-          url: (frontendBaseUrl.replace(/\/+$/, "")) +
-            "/dashboard/archived-emails/" +
-            encodeURIComponent(hit.id),
-          cc: hit.cc || [],
-          bcc: hit.bcc || [],
-          hasAttachments: Array.isArray(hit.attachments) && hit.attachments.length > 0,
-        };
+      if (
+        !apiResponse ||
+        !Array.isArray(apiResponse.hits)
+      ) {
+        browser.searchProviders.sendResults(request.queryId, {
+          results: [],
+          totalCount: 0,
+        });
+        return;
+      }
+
+      var mapped = apiResponse.hits.map(function (hit) {
+        return mapHitToResult(hit, frontendBaseUrl);
       });
+
+      if (signal.aborted) return;
 
       browser.searchProviders.sendResults(request.queryId, {
         results: mapped,
-        totalCount: results.total || mapped.length,
+        totalCount: apiResponse.total || mapped.length,
       });
     } catch (err) {
-      if (err.name === "AbortError") return;
+      if (err.name === "AbortError" || signal.aborted) return;
 
-      if (err.message && err.message.includes("Failed to fetch")) {
-        browser.searchProviders.sendError(
-          request.queryId,
-          "unavailable",
-          "Could not reach Open Archiver. Check URL and network."
-        );
-      } else if (
-        err.message &&
-        (err.message.includes("401") || err.message.includes("Unauthorized"))
-      ) {
-        browser.searchProviders.sendError(
-          request.queryId,
-          "auth-error",
-          "Authentication failed. Check API key in extension settings."
-        );
-      } else {
-        browser.searchProviders.sendError(
-          request.queryId,
-          "error",
-          err.message || "Search failed"
-        );
+      var errorInfo = classifyError(err);
+      browser.searchProviders.sendError(
+        request.queryId,
+        errorInfo.status,
+        errorInfo.message
+      );
+    } finally {
+      if (activeAbortController && !activeAbortController.signal.aborted) {
+        activeAbortController = null;
       }
     }
   }
 
-  async function fetchSearchResults(apiBaseUrl, apiKey, authToken, request) {
-    const url = new URL(apiBaseUrl.replace(/\/+$/, "") + "/v1/search");
-    const params = new URLSearchParams();
+  async function fetchWithRetry(
+    apiBaseUrl,
+    apiKey,
+    authToken,
+    request,
+    signal
+  ) {
+    var maxRetries = 1;
+    var attempt = 0;
+
+    while (attempt <= maxRetries) {
+      attempt++;
+
+      try {
+        return await executeSearch(
+          apiBaseUrl,
+          apiKey,
+          authToken,
+          request,
+          signal
+        );
+      } catch (err) {
+        if (signal.aborted) throw err;
+
+        if (
+          attempt <= maxRetries &&
+          isNetworkError(err)
+        ) {
+          continue;
+        }
+
+        if (
+          err.message &&
+          err.message.indexOf("429") !== -1
+        ) {
+          var retryAfter = extractRetryAfter(err);
+          if (retryAfter > 0) {
+            await sleep(Math.min(retryAfter * 1000, 10000));
+            continue;
+          }
+        }
+
+        throw err;
+      }
+    }
+
+    throw new Error("Search failed after " + maxRetries + " retries");
+  }
+
+  async function executeSearch(
+    apiBaseUrl,
+    apiKey,
+    authToken,
+    request,
+    signal
+  ) {
+    var baseUrl = apiBaseUrl.replace(/\/+$/, "");
+    var url = new URL(baseUrl + "/v1/search");
+    var params = new URLSearchParams();
 
     if (request.searchString) {
       params.set("keywords", request.searchString);
     }
-    params.set("page", String(Math.floor((request.offset || 0) / (request.limit || 10)) + 1));
+    params.set(
+      "page",
+      String(
+        Math.floor(
+          (request.offset || 0) / (request.limit || 10)
+        ) + 1
+      )
+    );
     params.set("limit", String(request.limit || 10));
 
     if (request.filters) {
-      if (request.filters.sender) params.set("from", request.filters.sender);
-      if (request.filters.recipient) params.set("to", request.filters.recipient);
-      if (request.filters.dateFrom) params.set("dateFrom", String(request.filters.dateFrom));
-      if (request.filters.dateTo) params.set("dateTo", String(request.filters.dateTo));
+      if (request.filters.sender) {
+        params.set("from", request.filters.sender);
+      }
+      if (request.filters.recipient) {
+        params.set("to", request.filters.recipient);
+      }
+      if (request.filters.recipientCc) {
+        params.set("cc", request.filters.recipientCc);
+      }
+      if (request.filters.recipientBcc) {
+        params.set("bcc", request.filters.recipientBcc);
+      }
+      if (request.filters.dateFrom) {
+        params.set(
+          "dateFrom",
+          String(request.filters.dateFrom)
+        );
+      }
+      if (request.filters.dateTo) {
+        params.set("dateTo", String(request.filters.dateTo));
+      }
     }
 
     url.search = params.toString();
 
-    const headers = {};
+    var headers = {
+      Accept: "application/json",
+    };
     if (apiKey) {
       headers["X-API-Key"] = apiKey;
     } else if (authToken) {
       headers["Authorization"] = "Bearer " + authToken;
     }
-    headers["Accept"] = "application/json";
 
-    const response = await fetch(url.toString(), {
+    var timeoutMs = 5000;
+    var combinedSignal = combineSignals(
+      signal,
+      AbortSignal.timeout(timeoutMs)
+    );
+
+    var response = await fetch(url.toString(), {
       headers: headers,
-      signal: AbortSignal.timeout(5000),
+      signal: combinedSignal,
     });
 
-    if (!response.ok) {
+    if (response.status === 401) {
       throw new Error(
-        "HTTP " + response.status + ": " + response.statusText
+        "HTTP 401: Unauthorized — check API key"
+      );
+    }
+    if (response.status === 403) {
+      throw new Error(
+        "HTTP 403: Forbidden — check search:archive permission"
+      );
+    }
+    if (response.status === 429) {
+      var retryAfter = response.headers.get("Retry-After") || "5";
+      throw new Error(
+        "HTTP 429: Rate limited. Retry-After: " + retryAfter
+      );
+    }
+    if (!response.ok) {
+      var body;
+      try {
+        body = await response.json();
+      } catch (e) {
+        body = {};
+      }
+      throw new Error(
+        "HTTP " +
+          response.status +
+          ": " +
+          (body.message || response.statusText || "Unknown error")
       );
     }
 
     return response.json();
   }
 
-  if (typeof browser !== "undefined" && browser.searchProviders) {
+  function mapHitToResult(hit, frontendBaseUrl) {
+    var snippet = "";
+    if (hit._formatted && hit._formatted.body) {
+      snippet = hit._formatted.body
+        .replace(/<\/?em>/g, "")
+        .substring(0, 300);
+    } else if (hit.body) {
+      snippet = hit.body.substring(0, 300);
+    }
+
+    var baseUrl = frontendBaseUrl.replace(/\/+$/, "");
+
+    return {
+      id: hit.id,
+      subject: hit.subject || "(no subject)",
+      sender: hit.from || "",
+      recipients: hit.to || [],
+      date: hit.timestamp || 0,
+      snippet: snippet,
+      url:
+        baseUrl +
+        "/dashboard/archived-emails/" +
+        encodeURIComponent(hit.id),
+      cc: hit.cc || [],
+      bcc: hit.bcc || [],
+      hasAttachments:
+        Array.isArray(hit.attachments) &&
+        hit.attachments.length > 0,
+    };
+  }
+
+  function classifyError(err) {
+    var msg = (err && err.message) || "";
+    var lower = msg.toLowerCase();
+
+    if (
+      msg.indexOf("401") !== -1 ||
+      msg.indexOf("unauthorized") !== -1
+    ) {
+      return {
+        status: "auth-error",
+        message:
+          "Authentication failed — check your API key or token in extension preferences.",
+      };
+    }
+
+    if (msg.indexOf("403") !== -1 || msg.indexOf("forbidden") !== -1) {
+      return {
+        status: "auth-error",
+        message:
+          "Access denied — your API key may lack the search:archive permission.",
+      };
+    }
+
+    if (msg.indexOf("429") !== -1 || msg.indexOf("rate limit") !== -1) {
+      return {
+        status: "error",
+        message:
+          "Rate limited by Open Archiver — please wait and try again.",
+      };
+    }
+
+    if (
+      msg.indexOf("fetch") !== -1 ||
+      msg.indexOf("network") !== -1 ||
+      msg.indexOf("failed") !== -1
+    ) {
+      return {
+        status: "unavailable",
+        message:
+          "Could not reach Open Archiver — check the server URL and network connection.",
+      };
+    }
+
+    if (msg.indexOf("timeout") !== -1 || msg.indexOf("timed out") !== -1) {
+      return {
+        status: "unavailable",
+        message:
+          "Open Archiver did not respond in time (5s timeout).",
+      };
+    }
+
+    return {
+      status: "error",
+      message: msg || "Search failed.",
+    };
+  }
+
+  function isNetworkError(err) {
+    var msg = (err && err.message) || "";
+    return (
+      msg.indexOf("fetch") !== -1 ||
+      msg.indexOf("network") !== -1 ||
+      msg.indexOf("Failed to fetch") !== -1 ||
+      msg.indexOf("TypeError") !== -1
+    );
+  }
+
+  function extractRetryAfter(err) {
+    try {
+      var parts = err.message.split("Retry-After: ");
+      if (parts.length > 1) {
+        return parseInt(parts[1], 10) || 5;
+      }
+    } catch (e) {}
+    return 5;
+  }
+
+  function combineSignals(signal1, signal2) {
+    var controller = new AbortController();
+
+    function onAbort() {
+      controller.abort();
+    }
+
+    signal1.addEventListener("abort", onAbort);
+    signal2.addEventListener("abort", onAbort);
+
+    if (signal1.aborted || signal2.aborted) {
+      controller.abort();
+    }
+
+    var originalController = controller;
+    return controller.signal;
+  }
+
+  function sleep(ms) {
+    return new Promise(function (resolve) {
+      setTimeout(resolve, ms);
+    });
+  }
+
+  if (
+    typeof browser !== "undefined" &&
+    browser.searchProviders
+  ) {
     registerProvider();
   }
 })();
