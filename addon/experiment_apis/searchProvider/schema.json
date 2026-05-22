@@ -108,10 +108,20 @@
                       "type": "boolean",
                       "optional": true
                     },
-                    "localEmlPath": {
+                    "storagePath": {
                       "type": "string",
                       "optional": true,
-                      "description": "Local filesystem path to the .eml file for opening in Thunderbird"
+                      "description": "Storage path from OA API for downloading the .eml file"
+                    },
+                    "apiBaseUrl": {
+                      "type": "string",
+                      "optional": true,
+                      "description": "OA API base URL for downloading the .eml file"
+                    },
+                    "apiKey": {
+                      "type": "string",
+                      "optional": true,
+                      "description": "OA API key for authenticating the download"
                     }
                   },
                   "required": ["id", "subject", "sender", "recipients", "date", "snippet", "url"]

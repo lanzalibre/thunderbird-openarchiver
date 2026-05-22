@@ -158,13 +158,14 @@
 
       if (signal.aborted) return;
 
-      // Attach localEmlPath to each result
+      // Attach storagePath and API credentials to each result
+      var credApiKey = settings.apiKey || "";
+      var credApiBaseUrl = settings.apiBaseUrl || "";
       for (var i = 0; i < mapped.length; i++) {
-        if (storagePaths[i] && emlTemplate) {
-          mapped[i].localEmlPath = emlTemplate.replace(
-            /\{storagePath\}/g,
-            storagePaths[i]
-          );
+        if (storagePaths[i]) {
+          mapped[i].storagePath = storagePaths[i];
+          mapped[i].apiBaseUrl = credApiBaseUrl;
+          mapped[i].apiKey = credApiKey;
         }
       }
 

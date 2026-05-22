@@ -233,59 +233,81 @@ var cls = class extends ExtensionAPI {
             item.appendChild(snippetEl);
           }
 
-          var url = result.url;
-          var localPath = result.localEmlPath;
-          (function (resultUrl, localEmlPath) {
-            item.addEventListener("click", function () {
-              Services.console.logStringMessage(
-                "searchProviders: click localEmlPath=[" + (localEmlPath || "") + "] url=[" + (resultUrl || "") + "] MailUtils=" + (typeof MailUtils)
-              );
-              if (localEmlPath) {
+          var resultUrl = result.url;
+          var storagePath = result.storagePath;
+          var apiBaseUrl = result.apiBaseUrl;
+          var apiKey = result.apiKey;
+          (function (url_0, spath, apibase, apikey) {
+            item.addEventListener("click", async function () {
+              if (spath && apibase) {
                 try {
-                  var file = Cc[
-                    "@mozilla.org/file/local;1"
-                  ].createInstance(Ci.nsIFile);
-                  file.initWithPath(localEmlPath);
-                  var exists = file.exists();
-                  Services.console.logStringMessage(
-                    "searchProviders: file exists=" + exists + " path=" + localEmlPath
+                  var downloadUrl =
+                    apibase.replace(/\/+$/, "") +
+                    "/v1/storage/download?path=" +
+                    encodeURIComponent(spath);
+                  var resp = await fetch(downloadUrl, {
+                    headers: apikey
+                      ? { "X-API-Key": apikey }
+                      : { Accept: "application/octet-stream" },
+                    signal: AbortSignal.timeout(15000),
+                  });
+                  if (!resp.ok) throw new Error("HTTP " + resp.status);
+                  var buf = await resp.arrayBuffer();
+
+                  var tmpDir = Services.dirsvc.get(
+                    "TmpD",
+                    Ci.nsIFile
                   );
-                  if (exists) {
-                    var win =
-                      Services.wm.getMostRecentWindow(
-                        "mail:3pane"
-                      );
-                    if (win) {
-                      Services.console.logStringMessage(
-                        "searchProviders: opening with MailUtils.openEMLFile"
-                      );
-                      var fileUri = Services.io
-                        .getProtocolHandler("file")
-                        .QueryInterface(
-                          Ci.nsIFileProtocolHandler
-                        )
-                        .newFileURI(file);
-                      MailUtils.openEMLFile(win, file, fileUri);
-                      return;
-                    }
+                  var tmpFile = tmpDir.clone();
+                  tmpFile.append(
+                    "oa-" +
+                      Date.now() +
+                      "-" +
+                      Math.random().toString(36).slice(2, 8) +
+                      ".eml"
+                  );
+
+                  var stream = Cc[
+                    "@mozilla.org/network/file-output-stream;1"
+                  ].createInstance(Ci.nsIFileOutputStream);
+                  stream.init(
+                    tmpFile,
+                    0x02 | 0x08 | 0x20,
+                    0o666,
+                    0
+                  );
+                  var bytes = new Uint8Array(buf);
+                  stream.write(bytes, bytes.length);
+                  stream.close();
+
+                  var win =
+                    Services.wm.getMostRecentWindow(
+                      "mail:3pane"
+                    );
+                  if (win) {
+                    var fileUri = Services.io
+                      .getProtocolHandler("file")
+                      .QueryInterface(
+                        Ci.nsIFileProtocolHandler
+                      )
+                      .newFileURI(tmpFile);
+                    MailUtils.openEMLFile(win, tmpFile, fileUri);
+                    return;
                   }
                 } catch (e) {
                   Services.console.logStringMessage(
-                    "searchProviders: openEml error: " +
+                    "searchProviders: downloadEml error: " +
                       (e.message || e)
                   );
                 }
               }
-              if (resultUrl) {
-                Services.console.logStringMessage(
-                  "searchProviders: falling back to external protocol service"
-                );
+              if (url_0) {
                 try {
                   var ep = Cc[
                     "@mozilla.org/uriloader/external-protocol-service;1"
                   ].getService(Ci.nsIExternalProtocolService);
                   ep.loadURI(
-                    Services.io.newURI(resultUrl, null, null)
+                    Services.io.newURI(url_0, null, null)
                   );
                 } catch (e) {
                   Services.console.logStringMessage(
@@ -295,7 +317,7 @@ var cls = class extends ExtensionAPI {
                 }
               }
             });
-          })(url, localPath);
+          })(resultUrl, storagePath, apiBaseUrl, apiKey);
 
           list.appendChild(item);
         }
