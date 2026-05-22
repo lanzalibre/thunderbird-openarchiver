@@ -161,13 +161,16 @@
       // Attach storagePath and API credentials to each result
       var credApiKey = settings.apiKey || "";
       var credApiBaseUrl = settings.apiBaseUrl || "";
+      var storageCount = 0;
       for (var i = 0; i < mapped.length; i++) {
         if (storagePaths[i]) {
           mapped[i].storagePath = storagePaths[i];
           mapped[i].apiBaseUrl = credApiBaseUrl;
           mapped[i].apiKey = credApiKey;
+          storageCount++;
         }
       }
+      console.log("OA: storagePaths found=" + storageCount + "/" + mapped.length);
 
       trySendResults(request.queryId, {
         results: mapped,
@@ -386,15 +389,20 @@
       }
       var combinedSignal = combineSignals(
         signal,
-        AbortSignal.timeout(3000)
+        AbortSignal.timeout(5000)
       );
+      console.log("OA: fetchArchivedEmail url=" + url);
       var response = await fetch(url, {
         headers: headers,
         signal: combinedSignal,
       });
+      console.log("OA: fetchArchivedEmail status=" + response.status + " ok=" + response.ok);
       if (!response.ok) return null;
-      return response.json();
+      var data = await response.json();
+      console.log("OA: fetchArchivedEmail storagePath=" + (data && data.storagePath ? data.storagePath : "MISSING"));
+      return data;
     } catch (e) {
+      console.log("OA: fetchArchivedEmail error=" + (e.message || e));
       return null;
     }
   }
