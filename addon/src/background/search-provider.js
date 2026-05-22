@@ -7,11 +7,14 @@
   var activeAbortController = null;
   var signalListeners = [];
 
+  try { console.log("OA: background search-provider.js loaded, browser=" + (typeof browser) + ", searchProviders=" + (browser && browser.searchProviders ? "yes" : "no")); } catch(e) {}
+
   function init() {
     if (
       typeof browser !== "undefined" &&
       browser.searchProviders
     ) {
+      try { console.log("OA: browser.searchProviders available, registering..."); } catch(e) {}
       registerProvider();
     } else if (retryCount < maxRetries) {
       retryCount++;
@@ -160,14 +163,20 @@
 
   function trySendResults(queryId, response) {
     try {
+      console.log("OA: sendResults queryId=" + queryId + " results=" + (response && response.results ? response.results.length : 0));
       browser.searchProviders.sendResults(queryId, response);
-    } catch (e) {}
+    } catch (e) {
+      console.log("OA: sendResults error: " + (e.message || e));
+    }
   }
 
   function trySendError(queryId, status, message) {
     try {
+      console.log("OA: sendError queryId=" + queryId + " status=" + status + " msg=" + message);
       browser.searchProviders.sendError(queryId, status, message);
-    } catch (e) {}
+    } catch (e) {
+      console.log("OA: sendError exception: " + (e.message || e));
+    }
   }
 
   async function fetchWithRetry(

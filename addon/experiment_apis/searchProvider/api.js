@@ -3,231 +3,189 @@
 var { ExtensionCommon } = ChromeUtils.importESModule(
   "resource://gre/modules/ExtensionCommon.sys.mjs"
 );
-var { Services } = ChromeUtils.importESModule(
-  "resource://gre/modules/Services.sys.mjs"
-);
 
-this.searchProviders = class extends ExtensionAPI {
+var cls = class extends ExtensionAPI {
   getAPI(context) {
     let searchEventFire = null;
     const providers = new Map();
     let hookInstalled = false;
-    let patchedSearcher = false;
-    let originalGetCollection = null;
-    let searchInputListener = null;
 
-    function installHook() {
+    function setupKeypressHook() {
       if (hookInstalled) return;
-      hookInstalled = true;
-
-      // Strategy 1: Monkeypatch GlodaMsgSearcher (works if import path is correct)
-      tryPatchGloda();
-
-      // Strategy 2: DOM-level search bar interception (always works)
-      tryInstallDomHook();
-    }
-
-    function tryPatchGloda() {
       try {
-        const { GlodaMsgSearcher } = ChromeUtils.importESModule(
-          "resource:///modules/gloda/GlodaMsgSearcher.sys.mjs"
-        );
-        if (
-          GlodaMsgSearcher &&
-          GlodaMsgSearcher.prototype &&
-          GlodaMsgSearcher.prototype.getCollection
-        ) {
-          originalGetCollection =
-            GlodaMsgSearcher.prototype.getCollection;
+        var win =
+          Services.wm.getMostRecentWindow("mail:3pane");
+        if (!win || !win.document) {
+          setTimeout(setupKeypressHook, 2000);
+          return;
+        }
 
-          GlodaMsgSearcher.prototype.getCollection = function (
-            aListener,
-            aData
-          ) {
-            const queryId =
+        win.addEventListener(
+          "keypress",
+          function (event) {
+            if (event.key !== "Enter") return;
+            var el = event.target;
+            if (!el || !el.value) return;
+
+            var isSearch =
+              el.id === "searchInput" ||
+              el.id === "search-box" ||
+              (el.localName === "textbox" &&
+                el.getAttribute("type") === "search") ||
+              (el.localName === "search-textbox") ||
+              (el.localName === "input" &&
+                el.getAttribute("type") === "search") ||
+              el.localName === "global-search-bar" ||
+              (el.classList &&
+                el.classList.contains(
+                  "remote-gloda-search"
+                ));
+
+            if (!isSearch) {
+              Services.console.logStringMessage(
+                "searchProviders: keypress on non-search element: " +
+                  el.localName + "#" + (el.id || "") + "." + (el.className || "")
+              );
+              return;
+            }
+
+            var queryId =
               "oa-" +
               Date.now() +
               "-" +
               Math.random().toString(36).slice(2, 8);
 
             if (searchEventFire) {
-              const searchString =
-                this._searchString ||
-                (aData && aData.searchString) ||
-                "";
+              Services.console.logStringMessage(
+                "searchProviders: dispatching queryId=" + queryId + " search=" + el.value
+              );
               searchEventFire
                 .async({
-                  queryId,
-                  searchString,
+                  queryId: queryId,
+                  searchString: el.value,
                   offset: 0,
                   limit: 10,
                   filters: {},
                 })
-                .catch(() => {});
-            }
-
-            return originalGetCollection.call(this, aListener, aData);
-          };
-
-          patchedSearcher = true;
-        }
-      } catch (e) {
-        // Gloda not available via this path — DOM fallback below
-      }
-    }
-
-    function tryInstallDomHook() {
-      try {
-        var window =
-          Services.wm.getMostRecentWindow("mail:3pane");
-        if (!window) return;
-
-        var searchInput = window.document.querySelector(
-          ".remote-gloda-search, " +
-            "#searchInput, " +
-            "input[type='search'], " +
-            ".search-bar-input, " +
-            "#unifiedToolbar .search-container input"
-        );
-        if (!searchInput) {
-          searchInput = window.document.querySelector(
-            "[name='search'], " +
-              "[aria-label='Search'], " +
-              "toolbarbutton[label*='Search'] + * input"
-          );
-        }
-        if (searchInput && !searchInputListener) {
-          searchInputListener = function (event) {
-            if (event.key === "Enter") {
-              fireSearch(searchInput.value);
-            }
-          };
-          searchInput.addEventListener(
-            "keypress",
-            searchInputListener
-          );
-        }
-      } catch (e) {}
-    }
-
-    function fireSearch(searchString) {
-      if (!searchString || !searchEventFire) return;
-      var queryId =
-        "oa-" +
-        Date.now() +
-        "-" +
-        Math.random().toString(36).slice(2, 8);
-      searchEventFire
-        .async({
-          queryId: queryId,
-          searchString: searchString,
-          offset: 0,
-          limit: 10,
-          filters: {},
-        })
-        .catch(function () {});
-    }
-
-    function uninstallHook() {
-      hookInstalled = false;
-
-      // Restore Gloda patch
-      if (patchedSearcher && originalGetCollection) {
-        try {
-          const { GlodaMsgSearcher } = ChromeUtils.importESModule(
-            "resource:///modules/gloda/GlodaMsgSearcher.sys.mjs"
-          );
-          if (GlodaMsgSearcher) {
-            GlodaMsgSearcher.prototype.getCollection =
-              originalGetCollection;
-          }
-        } catch (e) {}
-        patchedSearcher = false;
-      }
-
-      // Remove DOM listener
-      if (searchInputListener) {
-        try {
-          const window =
-            Services.wm.getMostRecentWindow("mail:3pane");
-          if (window) {
-            const searchInput = window.document.querySelector(
-              ".remote-gloda-search, #searchInput, input[type='search']"
-            );
-            if (searchInput) {
-              searchInput.removeEventListener(
-                "keypress",
-                searchInputListener
+                .then(function () {
+                  Services.console.logStringMessage(
+                    "searchProviders: dispatch completed for " + queryId
+                  );
+                })
+                .catch(function (err) {
+                  Services.console.logStringMessage(
+                    "searchProviders: dispatch error for " + queryId + ": " + (err.message || err)
+                  );
+                });
+            } else {
+              Services.console.logStringMessage(
+                "searchProviders: searchEventFire is null for query=" + el.value
               );
             }
-          }
-        } catch (e) {}
-        searchInputListener = null;
+          },
+          true
+        );
+        hookInstalled = true;
+      } catch (e) {
+        Services.console.logStringMessage(
+          "searchProviders: hook error: " + (e.message || e)
+        );
       }
     }
 
     function getFacetDocument() {
       try {
-        const window =
+        var win =
           Services.wm.getMostRecentWindow("mail:3pane");
-        if (!window) return null;
-        const tabmail = window.document.getElementById("tabmail");
-        if (!tabmail) return null;
-        const tabInfo = tabmail.currentTabInfo;
-        if (!tabInfo || tabInfo.mode.type !== "glodaFacet")
+        if (!win) {
+          Services.console.logStringMessage("searchProviders: no mail:3pane window");
           return null;
-        const browser = tabInfo.browser;
-        if (!browser || !browser.contentDocument) return null;
-        return browser.contentDocument;
+        }
+        var tabmail = win.document.getElementById("tabmail");
+        if (!tabmail) {
+          Services.console.logStringMessage("searchProviders: no tabmail");
+          return null;
+        }
+        var tabInfo = tabmail.currentTabInfo;
+        if (!tabInfo) {
+          Services.console.logStringMessage("searchProviders: no current tab");
+          return null;
+        }
+        var mode = tabInfo.mode ? tabInfo.mode.type : "unknown";
+        if (mode !== "glodaFacet" && mode !== "glodaSearch") {
+          Services.console.logStringMessage("searchProviders: tab mode is " + mode + " not glodaFacet/glodaSearch");
+          return null;
+        }
+        var browser = tabInfo.browser;
+        if (!browser) {
+          Services.console.logStringMessage("searchProviders: no browser in " + mode + " tab");
+          return null;
+        }
+        var doc = browser.contentDocument || (browser.document && browser.document.getElementById("content") && browser.document.getElementById("content").contentDocument);
+        if (!doc) {
+          Services.console.logStringMessage("searchProviders: no contentDocument in " + mode + " tab");
+          return null;
+        }
+        return doc;
       } catch (e) {
+        Services.console.logStringMessage("searchProviders: getFacetDocument error: " + e.message);
         return null;
       }
     }
 
     function injectSection(queryId, response) {
       try {
-        const doc = getFacetDocument();
-        if (!doc) return;
+        var doc = getFacetDocument();
+        if (!doc) {
+          Services.console.logStringMessage("searchProviders: injectSection no document");
+          return;
+        }
+        Services.console.logStringMessage("searchProviders: injectSection doc=" + (doc.location ? doc.location.href : "no location") + " body=" + (!!doc.body));
 
-        let section = doc.getElementById("oa-search-results");
+        var section = doc.getElementById("oa-search-results");
         if (!section) {
           section = doc.createElement("div");
           section.id = "oa-search-results";
           section.style.cssText =
-            "margin:8px;padding:12px;border:1px solid #ccc;border-radius:4px;" +
-            "font-family:sans-serif;";
+            "margin:8px;padding:12px;border:1px solid #ccc;" +
+            "border-radius:4px;font-family:sans-serif;";
 
-          const header = doc.createElement("h3");
+          var header = doc.createElement("h3");
           header.id = "oa-search-header";
           header.style.cssText =
             "margin:0 0 8px 0;font-size:14px;color:#333;";
           section.appendChild(header);
 
-          const list = doc.createElement("div");
+          var list = doc.createElement("div");
           list.id = "oa-results-list";
           section.appendChild(list);
 
-          const resultsContainer =
+          var resultsContainer =
             doc.getElementById("results") || doc.body;
-          if (resultsContainer && resultsContainer.parentNode) {
+          if (
+            resultsContainer &&
+            resultsContainer.parentNode
+          ) {
             resultsContainer.parentNode.insertBefore(
               section,
               resultsContainer
             );
+            Services.console.logStringMessage("searchProviders: injectSection section inserted before results");
           } else {
             doc.body.appendChild(section);
+            Services.console.logStringMessage("searchProviders: injectSection section appended to body");
           }
         }
 
-        const header = doc.getElementById("oa-search-header");
-        const providerNames =
+        var header = doc.getElementById("oa-search-header");
+        var providerNames =
           Array.from(providers.keys()).join(", ");
         header.textContent =
           (response.results ? response.results.length : 0) +
           " results from " +
           providerNames;
 
-        const list = doc.getElementById("oa-results-list");
+        var list = doc.getElementById("oa-results-list");
         list.innerHTML = "";
 
         if (
@@ -238,78 +196,95 @@ this.searchProviders = class extends ExtensionAPI {
           return;
         }
 
-        for (const result of response.results) {
-          const item = doc.createElement("div");
+        for (var i = 0; i < response.results.length; i++) {
+          var result = response.results[i];
+          var item = doc.createElement("div");
           item.style.cssText =
             "padding:6px 0;border-bottom:1px solid #eee;cursor:pointer;";
 
-          const subjectEl = doc.createElement("span");
+          var subjectEl = doc.createElement("span");
           subjectEl.style.cssText =
             "font-weight:bold;font-size:13px;color:#1a73e8;display:block;";
           subjectEl.textContent =
             result.subject || "(no subject)";
           item.appendChild(subjectEl);
 
-          const metaEl = doc.createElement("span");
+          var metaEl = doc.createElement("span");
           metaEl.style.cssText =
             "font-size:11px;color:#666;display:flex;gap:12px;";
           metaEl.textContent =
             (result.sender || "") +
             " — " +
             (result.date
-              ? new Date(result.date * 1000).toLocaleDateString()
+              ? new Date(
+                  result.date * 1000
+                ).toLocaleDateString()
               : "");
           item.appendChild(metaEl);
 
           if (result.snippet) {
-            const snippetEl = doc.createElement("span");
+            var snippetEl = doc.createElement("span");
             snippetEl.style.cssText =
               "font-size:12px;color:#555;display:block;";
             snippetEl.textContent = result.snippet;
             item.appendChild(snippetEl);
           }
 
-          item.addEventListener("click", function () {
-            if (result.url) {
-              const win =
-                Services.wm.getMostRecentWindow("mail:3pane");
-              if (win) {
-                win.openLink(result.url);
+          var url = result.url;
+          (function (resultUrl) {
+            item.addEventListener("click", function () {
+              if (resultUrl) {
+                try {
+                  var ep = Cc[
+                    "@mozilla.org/uriloader/external-protocol-service;1"
+                  ].getService(Ci.nsIExternalProtocolService);
+                  ep.loadURI(Services.io.newURI(resultUrl, null, null));
+                } catch (e) {
+                  Services.console.logStringMessage(
+                    "searchProviders: openUrl error: " +
+                      e.message
+                  );
+                }
               }
-            }
-          });
+            });
+          })(url);
 
           list.appendChild(item);
         }
       } catch (e) {
         Services.console.logStringMessage(
-          "searchProviders: injectSection error: " + e.message
+          "searchProviders: injectSection error: " +
+            e.message
         );
       }
     }
 
     function injectError(queryId, status, message) {
       try {
-        const doc = getFacetDocument();
+        var doc = getFacetDocument();
         if (!doc) return;
 
-        let section = doc.getElementById("oa-search-results");
+        var section = doc.getElementById("oa-search-results");
         if (!section) {
           section = doc.createElement("div");
           section.id = "oa-search-results";
           section.style.cssText =
             "margin:8px;padding:12px;border:1px solid #e88;" +
-            "border-radius:4px;background:#fff5f5;font-family:sans-serif;";
+            "border-radius:4px;background:#fff5f5;" +
+            "font-family:sans-serif;";
 
-          const header = doc.createElement("h3");
+          var header = doc.createElement("h3");
           header.id = "oa-search-header";
           header.style.cssText =
             "margin:0 0 8px 0;font-size:14px;color:#c33;";
           section.appendChild(header);
 
-          const resultsContainer =
+          var resultsContainer =
             doc.getElementById("results") || doc.body;
-          if (resultsContainer && resultsContainer.parentNode) {
+          if (
+            resultsContainer &&
+            resultsContainer.parentNode
+          ) {
             resultsContainer.parentNode.insertBefore(
               section,
               resultsContainer
@@ -319,7 +294,7 @@ this.searchProviders = class extends ExtensionAPI {
           }
         }
 
-        const header = doc.getElementById("oa-search-header");
+        var header = doc.getElementById("oa-search-header");
         if (status === "auth-error") {
           header.textContent =
             "Authentication failed — check your API key in extension settings";
@@ -331,7 +306,7 @@ this.searchProviders = class extends ExtensionAPI {
             message || "Search provider error";
         }
 
-        const list = doc.getElementById("oa-results-list");
+        var list = doc.getElementById("oa-results-list");
         if (list) {
           list.innerHTML = "";
         }
@@ -350,14 +325,11 @@ this.searchProviders = class extends ExtensionAPI {
             label: options.label,
             ...options,
           });
-          installHook();
+          setupKeypressHook();
         },
 
         async unregister(name) {
           providers.delete(name);
-          if (providers.size === 0) {
-            uninstallHook();
-          }
         },
 
         sendResults(queryId, response) {
@@ -372,8 +344,14 @@ this.searchProviders = class extends ExtensionAPI {
           context,
           name: "searchProviders.onSearchRequest",
           register: function (fire) {
+            Services.console.logStringMessage(
+              "searchProviders: EventManager register called, fire=" + (typeof fire)
+            );
             searchEventFire = fire;
             return function () {
+              Services.console.logStringMessage(
+                "searchProviders: EventManager unregister called"
+              );
               searchEventFire = null;
             };
           },
@@ -381,16 +359,7 @@ this.searchProviders = class extends ExtensionAPI {
       },
     };
   }
-
-  onShutdown(isAppShutdown) {
-    if (isAppShutdown) return;
-    try {
-      const { GlodaMsgSearcher } = ChromeUtils.importESModule(
-        "resource:///modules/gloda/GlodaMsgSearcher.sys.mjs"
-      );
-      if (GlodaMsgSearcher && GlodaMsgSearcher.prototype.getCollection) {
-        GlodaMsgSearcher.prototype.getCollection = originalGetCollection;
-      }
-    } catch (e) {}
-  }
 };
+
+this.searchProvider = cls;
+this.searchProviders = cls;

@@ -1,6 +1,7 @@
 node_modules/
 dist/
 *.xpi
+plans/
 *.zip
 .env
 .env.local
