@@ -149,6 +149,183 @@ function buildMessageUrl(frontendBaseUrl, messageId) {
   return `${base}/dashboard/archived-emails/${encodeURIComponent(messageId)}`;
 }
 
+// ── Search Provider Tests ─────────────────────────────────────────────────
+
+function testProviderMapsHitToResult() {
+  const hit = {
+    id: 'msg-001',
+    subject: 'Weekly Report',
+    from: 'boss@example.com',
+    to: ['me@example.com'],
+    cc: ['team@example.com'],
+    bcc: [],
+    timestamp: 1715000000,
+    body: 'Here is the weekly report with all the numbers.',
+    attachments: [{ filename: 'report.pdf' }],
+  };
+
+  const result = mapHitToProviderResult(hit, 'http://localhost:3000');
+
+  assert.strictEqual(result.id, 'msg-001');
+  assert.strictEqual(result.subject, 'Weekly Report');
+  assert.strictEqual(result.sender, 'boss@example.com');
+  assert.deepStrictEqual(result.recipients, ['me@example.com']);
+  assert.strictEqual(result.date, 1715000000);
+  assert.ok(result.snippet.includes('weekly report'));
+  assert.strictEqual(
+    result.url,
+    'http://localhost:3000/dashboard/archived-emails/msg-001'
+  );
+  assert.deepStrictEqual(result.cc, ['team@example.com']);
+  assert.strictEqual(result.hasAttachments, true);
+  console.log('  ✓ mapHitToProviderResult maps OA hit to provider format');
+}
+
+function testProviderMapsHitWithoutFormatted() {
+  const hit = {
+    id: 'msg-002',
+    subject: 'Simple',
+    from: 'a@b.com',
+    to: ['c@d.com'],
+    timestamp: 1715000001,
+    body: 'Short body',
+    attachments: [],
+  };
+
+  const result = mapHitToProviderResult(hit, 'http://localhost:3000');
+  assert.strictEqual(result.snippet, 'Short body');
+  assert.strictEqual(result.hasAttachments, false);
+  console.log('  ✓ mapHitToProviderResult handles no _formatted body');
+}
+
+function testProviderMapUsesFormattedSnippet() {
+  const hit = {
+    id: 'msg-003',
+    subject: 'Search Result',
+    from: 'x@y.com',
+    to: [],
+    timestamp: 1715000002,
+    body: 'Full body text that is long ' + 'x'.repeat(500),
+    _formatted: { body: 'Matched <em>keyword</em> in text...' },
+    attachments: [],
+  };
+
+  const result = mapHitToProviderResult(hit, 'http://localhost:3000');
+  assert.ok(result.snippet.includes('Matched'));
+  assert.ok(!result.snippet.includes('<em>'));
+  assert.ok(result.snippet.includes('keyword'));
+  console.log('  ✓ mapHitToProviderResult uses _formatted for snippet');
+}
+
+function testProviderHandleNullResults() {
+  const results = buildProviderResponse(null, 'http://localhost:3000');
+  assert.deepStrictEqual(results, []);
+  console.log('  ✓ buildProviderResponse handles null');
+}
+
+function testProviderHandleEmptyHits() {
+  const results = buildProviderResponse({ hits: [], total: 0 }, 'http://localhost:3000');
+  assert.deepStrictEqual(results, []);
+  console.log('  ✓ buildProviderResponse handles empty hits');
+}
+
+function testProviderHandleMissingFields() {
+  const hit = { id: 'msg-004', from: '', to: [], timestamp: 0 };
+  const result = mapHitToProviderResult(hit, 'http://localhost:3000');
+  assert.strictEqual(result.subject, '(no subject)');
+  assert.strictEqual(result.sender, '');
+  assert.strictEqual(result.snippet, '');
+  assert.strictEqual(result.hasAttachments, false);
+  console.log('  ✓ mapHitToProviderResult handles missing fields');
+}
+
+function testProviderBuildsDeepLinkUrl() {
+  const url = buildProviderDeepLink('http://oa.example.com', 'abc-def-123');
+  assert.strictEqual(
+    url,
+    'http://oa.example.com/dashboard/archived-emails/abc-def-123'
+  );
+  console.log('  ✓ buildProviderDeepLink constructs correct URL');
+}
+
+function testProviderBuildsDeepLinkWithTrailingSlash() {
+  const url = buildProviderDeepLink('http://oa.example.com/', 'id-456');
+  assert.strictEqual(
+    url,
+    'http://oa.example.com/dashboard/archived-emails/id-456'
+  );
+  console.log('  ✓ buildProviderDeepLink handles trailing slash');
+}
+
+function testProviderErrorFormatting() {
+  const authError = formatProviderError('auth-error', 'Bad key');
+  assert.ok(authError.toLowerCase().includes('authentication'));
+
+  const unavailError = formatProviderError('unavailable', 'Down');
+  assert.ok(unavailError.toLowerCase().includes('unreachable'));
+
+  const genericError = formatProviderError('error', 'Something broke');
+  assert.strictEqual(genericError, 'Something broke');
+  console.log('  ✓ formatProviderError returns correct messages');
+}
+
+function testProviderErrorDefaults() {
+  const defaultError = formatProviderError('error', '');
+  assert.ok(defaultError.includes('Search failed'));
+  console.log('  ✓ formatProviderError provides default message');
+}
+
+// Search provider helper functions (pure, testable)
+
+function mapHitToProviderResult(hit, frontendBaseUrl) {
+  const snippet = (function () {
+    if (hit._formatted && hit._formatted.body) {
+      return hit._formatted.body.replace(/<\/?em>/g, '').substring(0, 300);
+    }
+    if (hit.body) {
+      return hit.body.substring(0, 300);
+    }
+    return '';
+  })();
+
+  return {
+    id: hit.id,
+    subject: hit.subject || '(no subject)',
+    sender: hit.from || '',
+    recipients: hit.to || [],
+    date: hit.timestamp || 0,
+    snippet: snippet,
+    url: buildProviderDeepLink(frontendBaseUrl, hit.id),
+    cc: hit.cc || [],
+    bcc: hit.bcc || [],
+    hasAttachments: Array.isArray(hit.attachments) && hit.attachments.length > 0,
+  };
+}
+
+function buildProviderResponse(apiResponse, frontendBaseUrl) {
+  if (!apiResponse || !Array.isArray(apiResponse.hits)) {
+    return [];
+  }
+  return apiResponse.hits.map(function (hit) {
+    return mapHitToProviderResult(hit, frontendBaseUrl);
+  });
+}
+
+function buildProviderDeepLink(frontendBaseUrl, messageId) {
+  const base = frontendBaseUrl.replace(/\/+$/, '');
+  return base + '/dashboard/archived-emails/' + encodeURIComponent(messageId);
+}
+
+function formatProviderError(status, message) {
+  if (status === 'auth-error') {
+    return 'Authentication failed — check your API key in extension settings';
+  }
+  if (status === 'unavailable') {
+    return 'Service unreachable — check network connection';
+  }
+  return message || 'Search failed';
+}
+
 // Run tests
 console.log('Running unit tests...\n');
 testNormalizeEmptyResults();
@@ -157,4 +334,14 @@ testNormalizeNoAttachments();
 testValidatesNormalizeBaseUrl();
 testValidatesIsValidUrl();
 testBuildMessageUrl();
+testProviderMapsHitToResult();
+testProviderMapsHitWithoutFormatted();
+testProviderMapUsesFormattedSnippet();
+testProviderHandleNullResults();
+testProviderHandleEmptyHits();
+testProviderHandleMissingFields();
+testProviderBuildsDeepLinkUrl();
+testProviderBuildsDeepLinkWithTrailingSlash();
+testProviderErrorFormatting();
+testProviderErrorDefaults();
 console.log('\nAll tests passed ✓');

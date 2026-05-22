@@ -1,0 +1,196 @@
+[
+  {
+    "namespace": "searchProviders",
+    "description": "API for registering custom search providers that appear in Thunderbird's global search results.",
+    "functions": [
+      {
+        "name": "register",
+        "type": "function",
+        "description": "Register a search provider",
+        "async": true,
+        "parameters": [
+          {
+            "name": "name",
+            "type": "string",
+            "description": "Unique provider identifier (e.g. 'openarchiver')"
+          },
+          {
+            "name": "options",
+            "type": "object",
+            "description": "Provider configuration",
+            "properties": {
+              "label": {
+                "type": "string",
+                "description": "Human-readable label for the results section"
+              },
+              "icon": {
+                "type": "string",
+                "optional": true,
+                "description": "Icon URL (extension-relative or data URI)"
+              },
+              "defaultQueryLimit": {
+                "type": "integer",
+                "optional": true,
+                "minimum": 1,
+                "maximum": 50,
+                "default": 10,
+                "description": "Maximum results per query"
+              },
+              "timeoutMs": {
+                "type": "integer",
+                "optional": true,
+                "minimum": 1000,
+                "maximum": 30000,
+                "default": 5000,
+                "description": "Per-query timeout in milliseconds"
+              }
+            },
+            "required": ["label"]
+          }
+        ]
+      },
+      {
+        "name": "unregister",
+        "type": "function",
+        "description": "Unregister a previously registered search provider",
+        "async": true,
+        "parameters": [
+          {
+            "name": "name",
+            "type": "string"
+          }
+        ]
+      },
+      {
+        "name": "sendResults",
+        "type": "function",
+        "description": "Submit search results for a query. Call this from your onSearchRequest handler after fetching results.",
+        "async": false,
+        "parameters": [
+          {
+            "name": "queryId",
+            "type": "string",
+            "description": "The queryId from the onSearchRequest event"
+          },
+          {
+            "name": "response",
+            "type": "object",
+            "description": "Search response with results array",
+            "properties": {
+              "results": {
+                "type": "array",
+                "description": "Array of search results",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "id": { "type": "string" },
+                    "subject": { "type": "string" },
+                    "sender": { "type": "string" },
+                    "senderName": { "type": "string", "optional": true },
+                    "recipients": {
+                      "type": "array",
+                      "items": { "type": "string" }
+                    },
+                    "date": { "type": "integer" },
+                    "snippet": { "type": "string" },
+                    "url": { "type": "string" },
+                    "cc": {
+                      "type": "array",
+                      "items": { "type": "string" },
+                      "optional": true
+                    },
+                    "bcc": {
+                      "type": "array",
+                      "items": { "type": "string" },
+                      "optional": true
+                    },
+                    "hasAttachments": {
+                      "type": "boolean",
+                      "optional": true
+                    }
+                  },
+                  "required": ["id", "subject", "sender", "recipients", "date", "snippet", "url"]
+                }
+              },
+              "totalCount": {
+                "type": "integer",
+                "description": "Total number of matching results"
+              }
+            },
+            "required": ["results"]
+          }
+        ]
+      },
+      {
+        "name": "sendError",
+        "type": "function",
+        "description": "Report an error for a query. The search results section will show an error state.",
+        "async": false,
+        "parameters": [
+          {
+            "name": "queryId",
+            "type": "string"
+          },
+          {
+            "name": "status",
+            "type": "string",
+            "enum": ["error", "unavailable", "auth-error"],
+            "description": "Error type"
+          },
+          {
+            "name": "message",
+            "type": "string",
+            "optional": true,
+            "description": "Human-readable error message"
+          }
+        ]
+      }
+    ],
+    "events": [
+      {
+        "name": "onSearchRequest",
+        "type": "function",
+        "description": "Fired when Thunderbird dispatches a search query. Handle this by fetching results from your backend and calling sendResults().",
+        "parameters": [
+          {
+            "name": "request",
+            "type": "object",
+            "properties": {
+              "queryId": {
+                "type": "string",
+                "description": "Unique query ID. Pass this to sendResults() when returning results."
+              },
+              "searchString": {
+                "type": "string",
+                "description": "The user's search query text"
+              },
+              "offset": {
+                "type": "integer",
+                "optional": true,
+                "default": 0
+              },
+              "limit": {
+                "type": "integer",
+                "optional": true,
+                "default": 10
+              },
+              "filters": {
+                "type": "object",
+                "optional": true,
+                "description": "Optional filters applied to the search",
+                "properties": {
+                  "sender": { "type": "string", "optional": true },
+                  "recipient": { "type": "string", "optional": true },
+                  "dateFrom": { "type": "integer", "optional": true },
+                  "dateTo": { "type": "integer", "optional": true },
+                  "hasAttachments": { "type": "boolean", "optional": true }
+                }
+              }
+            },
+            "required": ["queryId", "searchString"]
+          }
+        ]
+      }
+    ]
+  }
+]

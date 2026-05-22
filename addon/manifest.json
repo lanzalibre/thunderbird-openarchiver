@@ -8,19 +8,36 @@
   "applications": {
     "gecko": {
       "id": "openarchiver-search@lanzalibre.github.io",
-      "strict_min_version": "115.0"
+      "strict_min_version": "128.0"
     }
   },
   "permissions": [
     "storage",
     "tabs",
-    "notifications"
+    "notifications",
+    "http://localhost/*",
+    "https://localhost/*"
   ],
+  "experiment_apis": {
+    "searchProvider": {
+      "schema": "experiment_apis/searchProvider/schema.json",
+      "parent": {
+        "scopes": ["addon_parent"],
+        "paths": [["searchProviders"]],
+        "script": "experiment_apis/searchProvider/api.js",
+        "events": ["startup"]
+      }
+    }
+  },
   "background": {
     "scripts": [
+      "src/lib/errors.js",
+      "src/lib/normalize.js",
+      "src/lib/validate.js",
       "src/background/api.js",
       "src/background/auth.js",
-      "src/background/state.js"
+      "src/background/state.js",
+      "src/background/search-provider.js"
     ]
   },
   "options_ui": {
