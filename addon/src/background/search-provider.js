@@ -1,9 +1,23 @@
 (function () {
   var PROVIDER_NAME = "openarchiver";
   var registered = false;
+  var retryCount = 0;
+  var maxRetries = 10;
   var debounceTimer = null;
-  var pendingQueryId = null;
   var activeAbortController = null;
+  var signalListeners = [];
+
+  function init() {
+    if (
+      typeof browser !== "undefined" &&
+      browser.searchProviders
+    ) {
+      registerProvider();
+    } else if (retryCount < maxRetries) {
+      retryCount++;
+      setTimeout(init, 500 * retryCount);
+    }
+  }
 
   async function registerProvider() {
     if (registered) return;
@@ -17,6 +31,11 @@
         timeoutMs: 5000,
       });
     } catch (e) {
+      registered = false;
+      retryCount++;
+      if (retryCount < maxRetries) {
+        setTimeout(init, 500 * retryCount);
+      }
       return;
     }
 
@@ -33,9 +52,11 @@
       activeAbortController.abort();
     }
 
+    var capturedRequest = JSON.parse(JSON.stringify(request));
+
     debounceTimer = setTimeout(function () {
       debounceTimer = null;
-      handleSearchRequest(request);
+      handleSearchRequest(capturedRequest);
     }, 300);
   }
 
@@ -48,7 +69,7 @@
       try {
         settings = await getSettings();
       } catch (e) {
-        browser.searchProviders.sendError(
+        trySendError(
           request.queryId,
           "error",
           "Could not read extension settings."
@@ -57,7 +78,7 @@
       }
 
       if (!settings.apiBaseUrl) {
-        browser.searchProviders.sendError(
+        trySendError(
           request.queryId,
           "unavailable",
           "Open Archiver URL not configured. Open add-on preferences."
@@ -66,7 +87,7 @@
       }
 
       if (!settings.apiKey && !settings.authToken) {
-        browser.searchProviders.sendError(
+        trySendError(
           request.queryId,
           "auth-error",
           "Authentication not configured. Set an API key or auth token in extension preferences."
@@ -91,7 +112,7 @@
         !apiResponse ||
         !Array.isArray(apiResponse.hits)
       ) {
-        browser.searchProviders.sendResults(request.queryId, {
+        trySendResults(request.queryId, {
           results: [],
           totalCount: 0,
         });
@@ -104,7 +125,7 @@
 
       if (signal.aborted) return;
 
-      browser.searchProviders.sendResults(request.queryId, {
+      trySendResults(request.queryId, {
         results: mapped,
         totalCount: apiResponse.total || mapped.length,
       });
@@ -112,16 +133,32 @@
       if (err.name === "AbortError" || signal.aborted) return;
 
       var errorInfo = classifyError(err);
-      browser.searchProviders.sendError(
+      trySendError(
         request.queryId,
         errorInfo.status,
         errorInfo.message
       );
     } finally {
-      if (activeAbortController && !activeAbortController.signal.aborted) {
+      if (
+        activeAbortController &&
+        !activeAbortController.signal.aborted
+      ) {
         activeAbortController = null;
       }
+      cleanupSignalListeners();
     }
+  }
+
+  function trySendResults(queryId, response) {
+    try {
+      browser.searchProviders.sendResults(queryId, response);
+    } catch (e) {}
+  }
+
+  function trySendError(queryId, status, message) {
+    try {
+      browser.searchProviders.sendError(queryId, status, message);
+    } catch (e) {}
   }
 
   async function fetchWithRetry(
@@ -155,10 +192,7 @@
           continue;
         }
 
-        if (
-          err.message &&
-          err.message.indexOf("429") !== -1
-        ) {
+        if (err.message && err.message.indexOf("429") !== -1) {
           var retryAfter = extractRetryAfter(err);
           if (retryAfter > 0) {
             await sleep(Math.min(retryAfter * 1000, 10000));
@@ -170,7 +204,9 @@
       }
     }
 
-    throw new Error("Search failed after " + maxRetries + " retries");
+    throw new Error(
+      "Search failed after " + maxRetries + " retries"
+    );
   }
 
   async function executeSearch(
@@ -217,7 +253,10 @@
         );
       }
       if (request.filters.dateTo) {
-        params.set("dateTo", String(request.filters.dateTo));
+        params.set(
+          "dateTo",
+          String(request.filters.dateTo)
+        );
       }
     }
 
@@ -232,10 +271,9 @@
       headers["Authorization"] = "Bearer " + authToken;
     }
 
-    var timeoutMs = 5000;
     var combinedSignal = combineSignals(
       signal,
-      AbortSignal.timeout(timeoutMs)
+      AbortSignal.timeout(5000)
     );
 
     var response = await fetch(url.toString(), {
@@ -254,7 +292,8 @@
       );
     }
     if (response.status === 429) {
-      var retryAfter = response.headers.get("Retry-After") || "5";
+      var retryAfter =
+        response.headers.get("Retry-After") || "5";
       throw new Error(
         "HTTP 429: Rate limited. Retry-After: " + retryAfter
       );
@@ -270,7 +309,9 @@
         "HTTP " +
           response.status +
           ": " +
-          (body.message || response.statusText || "Unknown error")
+          (body.message ||
+            response.statusText ||
+            "Unknown error")
       );
     }
 
@@ -323,7 +364,10 @@
       };
     }
 
-    if (msg.indexOf("403") !== -1 || msg.indexOf("forbidden") !== -1) {
+    if (
+      msg.indexOf("403") !== -1 ||
+      msg.indexOf("forbidden") !== -1
+    ) {
       return {
         status: "auth-error",
         message:
@@ -331,7 +375,10 @@
       };
     }
 
-    if (msg.indexOf("429") !== -1 || msg.indexOf("rate limit") !== -1) {
+    if (
+      msg.indexOf("429") !== -1 ||
+      msg.indexOf("rate limit") !== -1
+    ) {
       return {
         status: "error",
         message:
@@ -351,7 +398,10 @@
       };
     }
 
-    if (msg.indexOf("timeout") !== -1 || msg.indexOf("timed out") !== -1) {
+    if (
+      msg.indexOf("timeout") !== -1 ||
+      msg.indexOf("timed out") !== -1
+    ) {
       return {
         status: "unavailable",
         message:
@@ -390,17 +440,31 @@
 
     function onAbort() {
       controller.abort();
+      cleanupSignalListeners();
     }
 
     signal1.addEventListener("abort", onAbort);
     signal2.addEventListener("abort", onAbort);
 
+    signalListeners.push(
+      { signal: signal1, listener: onAbort },
+      { signal: signal2, listener: onAbort }
+    );
+
     if (signal1.aborted || signal2.aborted) {
       controller.abort();
     }
 
-    var originalController = controller;
     return controller.signal;
+  }
+
+  function cleanupSignalListeners() {
+    while (signalListeners.length > 0) {
+      var entry = signalListeners.pop();
+      try {
+        entry.signal.removeEventListener("abort", entry.listener);
+      } catch (e) {}
+    }
   }
 
   function sleep(ms) {
@@ -409,10 +473,5 @@
     });
   }
 
-  if (
-    typeof browser !== "undefined" &&
-    browser.searchProviders
-  ) {
-    registerProvider();
-  }
+  init();
 })();

@@ -7,90 +7,183 @@ var { Services } = ChromeUtils.importESModule(
   "resource://gre/modules/Services.sys.mjs"
 );
 
-let gOriginalGetCollection = null;
-let gHookInstalled = false;
-
-function ensureGloda() {
-  if (gOriginalGetCollection) return true;
-  try {
-    const { GlodaMsgSearcher } = ChromeUtils.importESModule(
-      "resource:///modules/gloda/GlodaMsgSearcher.sys.mjs"
-    );
-    if (GlodaMsgSearcher?.prototype?.getCollection) {
-      gOriginalGetCollection = GlodaMsgSearcher.prototype.getCollection;
-      return true;
-    }
-  } catch (e) {
-    // Gloda not yet available — will retry on first register
-  }
-  return false;
-}
-
 this.searchProviders = class extends ExtensionAPI {
   getAPI(context) {
     let searchEventFire = null;
     const providers = new Map();
+    let hookInstalled = false;
+    let patchedSearcher = false;
+    let originalGetCollection = null;
+    let searchInputListener = null;
 
     function installHook() {
-      if (gHookInstalled) return;
-      if (!ensureGloda()) {
-        Services.console.logStringMessage(
-          "searchProviders: Gloda not available, cannot install hook"
+      if (hookInstalled) return;
+      hookInstalled = true;
+
+      // Strategy 1: Monkeypatch GlodaMsgSearcher (works if import path is correct)
+      tryPatchGloda();
+
+      // Strategy 2: DOM-level search bar interception (always works)
+      tryInstallDomHook();
+    }
+
+    function tryPatchGloda() {
+      try {
+        const { GlodaMsgSearcher } = ChromeUtils.importESModule(
+          "resource:///modules/gloda/GlodaMsgSearcher.sys.mjs"
         );
-        return;
+        if (
+          GlodaMsgSearcher &&
+          GlodaMsgSearcher.prototype &&
+          GlodaMsgSearcher.prototype.getCollection
+        ) {
+          originalGetCollection =
+            GlodaMsgSearcher.prototype.getCollection;
+
+          GlodaMsgSearcher.prototype.getCollection = function (
+            aListener,
+            aData
+          ) {
+            const queryId =
+              "oa-" +
+              Date.now() +
+              "-" +
+              Math.random().toString(36).slice(2, 8);
+
+            if (searchEventFire) {
+              const searchString =
+                this._searchString ||
+                (aData && aData.searchString) ||
+                "";
+              searchEventFire
+                .async({
+                  queryId,
+                  searchString,
+                  offset: 0,
+                  limit: 10,
+                  filters: {},
+                })
+                .catch(() => {});
+            }
+
+            return originalGetCollection.call(this, aListener, aData);
+          };
+
+          patchedSearcher = true;
+        }
+      } catch (e) {
+        // Gloda not available via this path — DOM fallback below
       }
-      gHookInstalled = true;
+    }
 
-      const { GlodaMsgSearcher } = ChromeUtils.importESModule(
-        "resource:///modules/gloda/GlodaMsgSearcher.sys.mjs"
-      );
-
-      GlodaMsgSearcher.prototype.getCollection = function (aListener, aData) {
-        const queryId =
-          "oa-" + Date.now() + "-" + Math.random().toString(36).slice(2, 8);
-
-        if (searchEventFire) {
-          const searchString =
-            this._searchString ||
-            (aData && aData.searchString) ||
-            "";
-          searchEventFire
-            .async({
-              queryId,
-              searchString,
-              offset: 0,
-              limit: 10,
-              filters: {},
-            })
-            .catch(function () {});
+    function tryInstallDomHook() {
+      try {
+        const window =
+          Services.wm.getMostRecentWindow("mail:3pane");
+        if (!window) {
+          // Window not ready — listen for it
+          const listener = {
+            observe(aSubject, aTopic) {
+              if (aTopic === "domwindowopened") {
+                // Will be set up when a window is ready
+              }
+            },
+          };
+          Services.obs.addObserver(listener, "domwindowopened");
+          return;
         }
 
-        return gOriginalGetCollection.call(this, aListener, aData);
-      };
+        const searchInput = window.document.querySelector(
+          ".remote-gloda-search, #searchInput, input[type='search']"
+        );
+        if (searchInput && !searchInputListener) {
+          searchInputListener = function (event) {
+            if (event.key !== "Enter") return;
+            const searchString = searchInput.value;
+            if (!searchString) return;
+
+            const queryId =
+              "oa-" +
+              Date.now() +
+              "-" +
+              Math.random().toString(36).slice(2, 8);
+
+            if (searchEventFire) {
+              searchEventFire
+                .async({
+                  queryId,
+                  searchString,
+                  offset: 0,
+                  limit: 10,
+                  filters: {},
+                })
+                .catch(() => {});
+            }
+          };
+          searchInput.addEventListener(
+            "keypress",
+            searchInputListener
+          );
+        }
+      } catch (e) {
+        // DOM hook failed — search integration degraded
+      }
     }
 
     function uninstallHook() {
-      if (!gHookInstalled) return;
-      gHookInstalled = false;
-      if (!ensureGloda()) return;
-      const { GlodaMsgSearcher } = ChromeUtils.importESModule(
-        "resource:///modules/gloda/GlodaMsgSearcher.sys.mjs"
-      );
-      if (gOriginalGetCollection) {
-        GlodaMsgSearcher.prototype.getCollection = gOriginalGetCollection;
+      hookInstalled = false;
+
+      // Restore Gloda patch
+      if (patchedSearcher && originalGetCollection) {
+        try {
+          const { GlodaMsgSearcher } = ChromeUtils.importESModule(
+            "resource:///modules/gloda/GlodaMsgSearcher.sys.mjs"
+          );
+          if (GlodaMsgSearcher) {
+            GlodaMsgSearcher.prototype.getCollection =
+              originalGetCollection;
+          }
+        } catch (e) {}
+        patchedSearcher = false;
+      }
+
+      // Remove DOM listener
+      if (searchInputListener) {
+        try {
+          const window =
+            Services.wm.getMostRecentWindow("mail:3pane");
+          if (window) {
+            const searchInput = window.document.querySelector(
+              ".remote-gloda-search, #searchInput, input[type='search']"
+            );
+            if (searchInput) {
+              searchInput.removeEventListener(
+                "keypress",
+                searchInputListener
+              );
+            }
+          }
+        } catch (e) {}
+        searchInputListener = null;
       }
     }
 
     function getFacetDocument() {
-      const window = Services.wm.getMostRecentWindow("mail:3pane");
-      if (!window) return null;
-      const tabmail = window.document.getElementById("tabmail");
-      if (!tabmail) return null;
-      const tabInfo = tabmail.currentTabInfo;
-      if (!tabInfo || tabInfo.mode.type !== "glodaFacet") return null;
-      const browser = tabInfo.browser;
-      if (!browser || !browser.contentDocument) return null;
-      return browser.contentDocument;
+      try {
+        const window =
+          Services.wm.getMostRecentWindow("mail:3pane");
+        if (!window) return null;
+        const tabmail = window.document.getElementById("tabmail");
+        if (!tabmail) return null;
+        const tabInfo = tabmail.currentTabInfo;
+        if (!tabInfo || tabInfo.mode.type !== "glodaFacet")
+          return null;
+        const browser = tabInfo.browser;
+        if (!browser || !browser.contentDocument) return null;
+        return browser.contentDocument;
+      } catch (e) {
+        return null;
+      }
     }
 
     function injectSection(queryId, response) {
@@ -118,14 +211,19 @@ this.searchProviders = class extends ExtensionAPI {
 
           const resultsContainer =
             doc.getElementById("results") || doc.body;
-          resultsContainer.parentNode.insertBefore(
-            section,
-            resultsContainer
-          );
+          if (resultsContainer && resultsContainer.parentNode) {
+            resultsContainer.parentNode.insertBefore(
+              section,
+              resultsContainer
+            );
+          } else {
+            doc.body.appendChild(section);
+          }
         }
 
         const header = doc.getElementById("oa-search-header");
-        const providerNames = Array.from(providers.keys()).join(", ");
+        const providerNames =
+          Array.from(providers.keys()).join(", ");
         header.textContent =
           (response.results ? response.results.length : 0) +
           " results from " +
@@ -134,7 +232,10 @@ this.searchProviders = class extends ExtensionAPI {
         const list = doc.getElementById("oa-results-list");
         list.innerHTML = "";
 
-        if (!response.results || response.results.length === 0) {
+        if (
+          !response.results ||
+          response.results.length === 0
+        ) {
           list.textContent = "No results from external providers.";
           return;
         }
@@ -147,7 +248,8 @@ this.searchProviders = class extends ExtensionAPI {
           const subjectEl = doc.createElement("span");
           subjectEl.style.cssText =
             "font-weight:bold;font-size:13px;color:#1a73e8;display:block;";
-          subjectEl.textContent = result.subject || "(no subject)";
+          subjectEl.textContent =
+            result.subject || "(no subject)";
           item.appendChild(subjectEl);
 
           const metaEl = doc.createElement("span");
@@ -171,7 +273,11 @@ this.searchProviders = class extends ExtensionAPI {
 
           item.addEventListener("click", function () {
             if (result.url) {
-              window.openLink(result.url);
+              const win =
+                Services.wm.getMostRecentWindow("mail:3pane");
+              if (win) {
+                win.openLink(result.url);
+              }
             }
           });
 
@@ -205,10 +311,14 @@ this.searchProviders = class extends ExtensionAPI {
 
           const resultsContainer =
             doc.getElementById("results") || doc.body;
-          resultsContainer.parentNode.insertBefore(
-            section,
-            resultsContainer
-          );
+          if (resultsContainer && resultsContainer.parentNode) {
+            resultsContainer.parentNode.insertBefore(
+              section,
+              resultsContainer
+            );
+          } else {
+            doc.body.appendChild(section);
+          }
         }
 
         const header = doc.getElementById("oa-search-header");
@@ -219,7 +329,8 @@ this.searchProviders = class extends ExtensionAPI {
           header.textContent =
             "Service unavailable — check network connection";
         } else {
-          header.textContent = message || "Search provider error";
+          header.textContent =
+            message || "Search provider error";
         }
 
         const list = doc.getElementById("oa-results-list");
@@ -279,12 +390,9 @@ this.searchProviders = class extends ExtensionAPI {
       const { GlodaMsgSearcher } = ChromeUtils.importESModule(
         "resource:///modules/gloda/GlodaMsgSearcher.sys.mjs"
       );
-      if (gOriginalGetCollection) {
-        GlodaMsgSearcher.prototype.getCollection = gOriginalGetCollection;
+      if (GlodaMsgSearcher && GlodaMsgSearcher.prototype.getCollection) {
+        GlodaMsgSearcher.prototype.getCollection = originalGetCollection;
       }
-    } catch (e) {
-      // Module not available during shutdown
-    }
-    gHookInstalled = false;
+    } catch (e) {}
   }
 };
