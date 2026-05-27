@@ -17,10 +17,8 @@ jobs:
       - run: npm install
       - run: npm test
       - name: Lint with web-ext
-        uses: actionsflow/toxicity@v1
+        run: npx web-ext lint --self-hosted
         continue-on-error: true
-        with:
-          args: lint --self-hosted
 
   build:
     needs: test
