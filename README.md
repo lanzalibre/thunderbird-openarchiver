@@ -1,46 +1,55 @@
 # Thunderbird Open Archiver
 
-A Thunderbird MailExtension that integrates with [Open Archiver](https://github.com/open-archiver)'s REST API to search, browse, and open archived emails directly from Thunderbird.
+Search your [Open Archiver](https://github.com/open-archiver) email archive and view archived emails directly inside Thunderbird via a custom email viewer.
 
-## Features
+## How It Works
 
-- **Full-text search** across your Open Archiver archive using Meilisearch-powered search
-- **Filtered search** by sender, recipient, date range, and mailbox
-- **Deep linking** to Open Archiver's web UI for full message inspection
-- **Secure** API key or JWT authentication with local credential storage
+- Registers as a Thunderbird search provider via the **Experiment API** (`searchProvider`)
+- Hooks **Enter** keypress in Thunderbird's search bar to dispatch queries to the OA API
+- Fetches `storagePath` per result from `GET /v1/archived-emails/{id}`
+- Downloads decrypted `.eml` bytes via `GET /v1/storage/download?path=...` using `NetUtil.asyncFetch`
+- Renders the email in a `contentTab` as a `data:text/html` data URI with:
+  - Header bar (subject, from, to, date)
+  - Decoded HTML or plain-text body
+  - Multipart MIME parsing with QP/base64 + UTF-8 decoding
 
 ## Requirements
 
-- Thunderbird 115+ (Supernova) or 128+ ESR
-- Open Archiver instance with API access (see [Supported Versions](docs/overview.md#supported-versions))
-- An API key with `search:archive` permission
+- Thunderbird 151+ (MV2 experiment API)
+- Open Archiver instance with API access
+- API key with `search:archive` permission
+
+## Build
+
+```bash
+npm run build   # produces dist/thunderbird-openarchiver.xpi
+```
 
 ## Installation
 
-### Development (temporary add-on)
+### Development (temporary)
 
-1. Clone this repo
-2. Open Thunderbird → ☰ → Add-ons & Themes → Tools → Debug Add-ons
-3. Click "Load Temporary Add-on" and select `addon/manifest.json`
+1. Open Thunderbird → ☰ → Add-ons & Themes → Tools → Debug Add-ons
+2. Click "Load Temporary Add-on" and select `addon/manifest.json`
 
 ### Packaged (.xpi)
 
-1. Download the latest `.xpi` from [Releases](https://github.com/lanzalibre/thunderbird-openarchiver/releases)
-2. Open Thunderbird → ☰ → Add-ons & Themes → Tools → Install Add-on From File
-3. Select the downloaded `.xpi`
+1. Open Thunderbird → ☰ → Add-ons & Themes → Tools → Install Add-on From File
+2. Select the `.xpi`
 
 ## Configuration
 
-1. After installation, open the add-on's preferences (☰ → Add-ons & Themes → Open Archiver → Preferences)
-2. Enter your Open Archiver **API base URL** (e.g., `http://localhost:4000`)
-3. Enter your Open Archiver **Web UI base URL** (e.g., `http://localhost:3000`)
-4. Enter your **API key** or JWT token
-5. Click **Test Connection** to verify
+Configure via `about:addons` → Open Archiver → Preferences:
+- **API base URL** (e.g., `http://localhost:4000`)
+- **API key** or JWT token
 
-## Development
+## Technical Notes
 
-See [Development Guide](docs/development.md).
+- **Experiment API sandbox** lacks `fetch`, `XMLHttpRequest`, `btoa`, `TextDecoder` — HTTP via `NetUtil.asyncFetch`, UTF-8 via manual decoder
+- **`MailServices.messageServiceFromURI`** maps `file://` → `mailbox://`, breaking native `mailMessageTab` display for downloaded `.eml` files
+- **Gmail export format** duplicates headers (OA metadata + full RFC822) — body parser finds the last `Content-Type` in outer headers only
+- Downloaded `.eml` files are written to the OS temp dir (`TmpD`), auto-cleaned by the system
 
 ## License
 
-MIT
+GNU Affero General Public License v3.0 or later. See [LICENSE](LICENSE).
