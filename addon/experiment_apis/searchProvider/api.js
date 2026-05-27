@@ -3,9 +3,6 @@
 var { ExtensionCommon } = ChromeUtils.importESModule(
   "resource://gre/modules/ExtensionCommon.sys.mjs"
 );
-var { MailUtils } = ChromeUtils.importESModule(
-  "resource:///modules/MailUtils.sys.mjs"
-);
 var { NetUtil } = ChromeUtils.importESModule(
   "resource://gre/modules/NetUtil.sys.mjs"
 );
@@ -225,14 +222,166 @@ var cls = class extends ExtensionAPI {
               "mail:3pane"
             );
             if (win) {
-              var fileUri = Services.io
-                .getProtocolHandler("file")
-                .QueryInterface(Ci.nsIFileProtocolHandler)
-                .newFileURI(tmpFile);
-              Services.console.logStringMessage(
-                "searchProviders: opening with MailUtils.openEMLFile, uri=" + fileUri.spec
-              );
-              MailUtils.openEMLFile(win, tmpFile, fileUri);
+              (async () => {
+                try {
+                  // Convert buf to string for MIME parsing
+                  var rawEmail = "";
+                  var rawBytes = new Uint8Array(buf);
+                  for (var i = 0; i < rawBytes.length; i++) {
+                    rawEmail += String.fromCharCode(rawBytes[i]);
+                  }
+                  // Parse email with MimeParser
+                  var MimeParser = ChromeUtils.importESModule("resource:///modules/mimeParser.sys.mjs").MimeParser;
+                  var hdrs = MimeParser.extractHeaders(rawEmail);
+                  function getHdr(name) { return String(hdrs.has(name) ? hdrs.get(name) : ""); }
+                  var subject = getHdr("subject") || "(no subject)";
+                  var from = getHdr("from");
+                  var to = getHdr("to");
+                  var date = getHdr("date");
+                  // Fall back to raw regex if MimeParser returns objects
+                  if (from == "[object Object]" || from == "") {
+                    var m = rawEmail.match(/^From:\s*(.*)$/im);
+                    from = m ? m[1].trim() : "";
+                  }
+                  if (to == "[object Object]" || to == "") {
+                    var m = rawEmail.match(/^To:\s*(.*)$/im);
+                    to = m ? m[1].trim() : "";
+                  }
+                  if (date == "[object Object]" || date == "") {
+                    var m = rawEmail.match(/^Date:\s*(.*)$/im);
+                    date = m ? m[1].trim() : "";
+                  }
+                  if (subject == "[object Object]" || subject == "(no subject)") {
+                    var m = rawEmail.match(/^Subject:\s*(.*)$/im);
+                    subject = m ? m[1].trim() : "(no subject)";
+                  }
+                  // Normalize line endings
+                  var nl = rawEmail.replace(/\r\n/g, '\n');
+                  // UTF-8 decoder (TextDecoder not available in experiment sandbox)
+                  function utf8Decode(b) {
+                    var r = "";
+                    for (var i = 0; i < b.length; i++) {
+                      var v = b[i];
+                      if (v < 0x80) { r += String.fromCharCode(v); }
+                      else if (v >= 0xC0 && v < 0xE0) { r += String.fromCharCode(((v & 0x1F) << 6) | (b[++i] & 0x3F)); }
+                      else if (v >= 0xE0 && v < 0xF0) { r += String.fromCharCode(((v & 0x0F) << 12) | ((b[++i] & 0x3F) << 6) | (b[++i] & 0x3F)); }
+                      else if (v >= 0xF0 && v < 0xF8) { var c = ((v & 0x07) << 18) | ((b[++i] & 0x3F) << 12) | ((b[++i] & 0x3F) << 6) | (b[++i] & 0x3F); c -= 0x10000; r += String.fromCharCode(0xD800 + (c >> 10), 0xDC00 + (c & 0x3FF)); }
+                    }
+                    return r;
+                  }
+                  // QP decoder: bytes then UTF-8
+                  function qpDecode(s) {
+                    var b = [];
+                    for (var i = 0; i < s.length; i++) {
+                      if (s[i] == '=' && i + 2 < s.length && /[0-9A-Fa-f]{2}/i.test(s.substring(i+1, i+3))) {
+                        b.push(parseInt(s.substring(i+1, i+3), 16));
+                        i += 2;
+                      } else if (s[i] == '=' && s[i+1] == '\n') { i++; }
+                      else { b.push(s.charCodeAt(i)); }
+                    }
+                    return utf8Decode(b);
+                  }
+                  // Base64 decoder: bytes then UTF-8
+                  function b64Decode(s) {
+                    var c = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+                    var b = [];
+                    s = s.replace(/[^A-Za-z0-9+/=]/g, '');
+                    for (var i = 0; i < s.length; i += 4) {
+                      if (i + 3 >= s.length) break;
+                      var a = c.indexOf(s[i]), d = c.indexOf(s[i+1]), e = c.indexOf(s[i+2]), f = c.indexOf(s[i+3]);
+                      if (a==-1||d==-1) break;
+                      b.push((a << 2) | (d >> 4));
+                      if (e != -1) b.push(((d & 15) << 4) | (e >> 2));
+                      if (f != -1) b.push(((e & 3) << 6) | f);
+                    }
+                    return utf8Decode(b);
+                  }
+                  function getHdrVal(hdrs, name) {
+                    var re = new RegExp("^" + name + ":\\s*([\\s\\S]*?)(?:\\n[^\\s]|$)", "im");
+                    var m = hdrs.match(re);
+                    return m ? m[1].replace(/\n\s+/g, '').trim() : "";
+                  }
+                  function getEnc(hdrs) { return getHdrVal(hdrs, "Content-Transfer-Encoding").toLowerCase(); }
+                  function decodeBody(b, enc) {
+                    if (enc == "base64") return b64Decode(b);
+                    if (enc == "quoted-printable") return qpDecode(b);
+                    return b;
+                  }
+                  // Extract body with proper MIME handling
+                  var bodyHtml = "";
+                  try {
+                    // Find Content-Type in outer headers only (before first MIME boundary)
+                    var outerEnd = nl.indexOf("\n\n--");
+                    var searchSpace = outerEnd >= 0 ? nl.substring(0, outerEnd) : nl;
+                    var ctIdx = searchSpace.lastIndexOf("Content-Type:");
+                    var hdrText, rawBody;
+                    if (ctIdx >= 0) {
+                      var afterCt = nl.substring(ctIdx);
+                      var blIdx = afterCt.indexOf("\n\n");
+                      if (blIdx >= 0) {
+                        hdrText = nl.substring(0, ctIdx + blIdx);
+                        rawBody = nl.substring(ctIdx + blIdx + 2);
+                      } else { hdrText = nl; rawBody = ""; }
+                    } else {
+                      var sp = nl.indexOf("\n\n");
+                      hdrText = sp >= 0 ? nl.substring(0, sp) : nl;
+                      rawBody = sp >= 0 ? nl.substring(sp + 2) : "";
+                    }
+                    var ct = getHdrVal(hdrText, "Content-Type");
+                    var boundary = ct.match(/boundary\s*=\s*"?([^";\s]+)"?/i);
+                    if (boundary && ct.includes("multipart/")) {
+                      var parts = rawBody.split("--" + boundary[1]);
+                      for (var p = 0; p < parts.length; p++) {
+                        var part = parts[p];
+                        if (part == "" || part.startsWith("--")) continue;
+                        var pIdx = part.indexOf("\n\n");
+                        if (pIdx >= 0) {
+                          var ph = part.substring(0, pIdx);
+                          var pb = part.substring(pIdx + 2);
+                          var pct = getHdrVal(ph, "Content-Type");
+                          if (pct.includes("text/html") && !bodyHtml) {
+                            bodyHtml = decodeBody(pb, getEnc(ph));
+                          } else if (pct.includes("text/plain") && !bodyHtml) {
+                            bodyHtml = "<pre>" + decodeBody(pb, getEnc(ph)).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;") + "</pre>";
+                          }
+                        }
+                      }
+                    }
+                    if (!bodyHtml) {
+                      bodyHtml = decodeBody(rawBody, getEnc(hdrText));
+                      if (!ct.includes("text/html")) {
+                        bodyHtml = "<pre>" + bodyHtml.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;") + "</pre>";
+                      }
+                    }
+                  } catch (e) {
+                    Services.console.logStringMessage("searchProviders: body extraction error: " + e.message);
+                  }
+                  if (!bodyHtml) { bodyHtml = "<pre>" + rawEmail.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;") + "</pre>"; }
+                  // Build viewer HTML
+                  var shortSubj = subject.length > 60 ? subject.substring(0, 57) + "..." : subject;
+                  var viewer = '<!DOCTYPE html><html><head><meta charset="utf-8"><title>' + shortSubj.replace(/&/g,"&amp;").replace(/</g,"&lt;") + '</title><style>'
+                    + 'body{margin:0;font-family:system-ui,sans-serif;color:#222}'
+                    + '.hdr{background:#f5f5f5;padding:10px 16px;border-bottom:1px solid #ddd;font-size:13px}'
+                    + '.hdr .r{margin:3px 0}.hdr .l{display:inline-block;width:60px;font-weight:600;color:#666}'
+                    + '.hdr .s{font-size:15px;font-weight:600;color:#000}'
+                    + '.body{padding:16px}</style></head><body>'
+                    + '<div class="hdr">'
+                    + '<div class="r s">' + subject.replace(/&/g,"&amp;").replace(/</g,"&lt;") + '</div>'
+                    + '<div class="r"><span class="l">From:</span>' + from.replace(/&/g,"&amp;").replace(/</g,"&lt;") + '</div>'
+                    + '<div class="r"><span class="l">To:</span>' + to.replace(/&/g,"&amp;").replace(/</g,"&lt;") + '</div>'
+                    + '<div class="r"><span class="l">Date:</span>' + date.replace(/&/g,"&amp;").replace(/</g,"&lt;") + '</div>'
+                    + '</div><div class="body">' + bodyHtml + '</div></body></html>';
+                  var dataUri = "data:text/html," + encodeURIComponent(viewer);
+                  var tabmail = win.document.getElementById("tabmail");
+                  if (tabmail) {
+                    var tab = tabmail.openTab("contentTab", { url: dataUri });
+                    if (tab && tab.title !== undefined) { tab.title = shortSubj; }
+                    Services.console.logStringMessage("searchProviders: opened email viewer");
+                  }
+                } catch (e) {
+                  Services.console.logStringMessage("searchProviders: import error: " + (e.message || e) + " stack=" + (e.stack || ""));
+                }
+              })();
             }
           } catch (e) {
             Services.console.logStringMessage(
