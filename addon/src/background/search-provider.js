@@ -1,5 +1,4 @@
 (function () {
-  var PROVIDER_NAME = "openarchiver";
   var registered = false;
   var retryCount = 0;
   var maxRetries = 10;
@@ -15,7 +14,7 @@
       browser.searchProviders
     ) {
       try { console.log("OA: browser.searchProviders available, registering..."); } catch(e) {}
-      registerProvider();
+      setupListener();
     } else if (retryCount < maxRetries) {
       retryCount++;
       setTimeout(init, 500 * retryCount);
@@ -31,25 +30,9 @@
     }
   }
 
-  async function registerProvider() {
+  async function setupListener() {
     if (registered) return;
     registered = true;
-
-    try {
-      await browser.searchProviders.register(PROVIDER_NAME, {
-        label: "Open Archiver Archive",
-        icon: "assets/icon-32.svg",
-        defaultQueryLimit: 10,
-        timeoutMs: 5000,
-      });
-    } catch (e) {
-      registered = false;
-      retryCount++;
-      if (retryCount < maxRetries) {
-        setTimeout(init, 500 * retryCount);
-      }
-      return;
-    }
 
     browser.searchProviders.onSearchRequest.addListener(
       debounceRequest
