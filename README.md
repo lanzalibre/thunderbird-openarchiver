@@ -1,6 +1,6 @@
 # Thunderbird Open Archiver
 
-Search your [Open Archiver](https://github.com/open-archiver) email archive and view archived emails directly inside Thunderbird via a custom email viewer.
+Search your [Open Archiver](https://github.com/LogicLabs-OU/OpenArchiver) email archive and view archived emails directly inside Thunderbird via a custom email viewer.
 
 ## How It Works
 
